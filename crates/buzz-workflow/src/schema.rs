@@ -378,16 +378,88 @@ fn validate_cron(expr: &str) -> Result<(), WorkflowError> {
 
 /// Normalize a cron expression to the 7-field format required by the `cron` crate.
 ///
+/// Standard 5-field cron numbers Sunday as 0 (or 7) and Monday as 1. The
+/// `cron` crate numbers Sunday as 1, so translate the weekday field to names.
+///
 /// - 5 fields (`min hour dom month dow`) → prepend `0` (sec), append `*` (year)
 /// - 6 fields → append `*` (year)
 /// - 7 fields → unchanged
 pub(crate) fn normalize_cron(expr: &str) -> String {
-    let field_count = expr.split_whitespace().count();
-    match field_count {
-        5 => format!("0 {expr} *"),
+    let fields: Vec<&str> = expr.split_whitespace().collect();
+    match fields.len() {
+        5 => {
+            let weekday = normalize_standard_weekdays(fields[4]);
+            format!(
+                "0 {} {} {} {} {weekday} *",
+                fields[0], fields[1], fields[2], fields[3]
+            )
+        }
         6 => format!("{expr} *"),
         _ => expr.to_owned(),
     }
+}
+
+const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+fn standard_weekday(token: &str) -> Option<usize> {
+    match token.to_ascii_lowercase().as_str() {
+        "sun" | "sunday" => Some(0),
+        "mon" | "monday" => Some(1),
+        "tue" | "tues" | "tuesday" => Some(2),
+        "wed" | "wednesday" => Some(3),
+        "thu" | "thurs" | "thursday" => Some(4),
+        "fri" | "friday" => Some(5),
+        "sat" | "saturday" => Some(6),
+        _ => token.parse::<usize>().ok().filter(|day| *day <= 7),
+    }
+}
+
+fn normalize_standard_weekdays(field: &str) -> String {
+    if field == "*" {
+        return field.to_owned();
+    }
+    let mut selected = [false; 7];
+    for segment in field.split(',') {
+        let (base, step) = match segment.split_once('/') {
+            Some((base, step)) => match step.parse::<usize>().ok().filter(|n| *n > 0) {
+                Some(step) => (base, step),
+                None => return field.to_owned(),
+            },
+            None => (segment, 1),
+        };
+        let days: Vec<usize> = if base == "*" {
+            (0..=6).collect()
+        } else if let Some((start, end)) = base.split_once('-') {
+            let (Some(start), Some(end)) = (standard_weekday(start), standard_weekday(end)) else {
+                return field.to_owned();
+            };
+            if start <= end {
+                (start..=end).collect()
+            } else if end < 7 {
+                (start..=6).chain(0..=end).collect()
+            } else {
+                return field.to_owned();
+            }
+        } else {
+            let Some(day) = standard_weekday(base) else {
+                return field.to_owned();
+            };
+            if segment.contains('/') && day < 7 {
+                (day..=6).collect()
+            } else {
+                vec![day]
+            }
+        };
+        for day in days.into_iter().step_by(step) {
+            selected[day % 7] = true;
+        }
+    }
+    WEEKDAY_NAMES
+        .iter()
+        .enumerate()
+        .filter_map(|(day, name)| selected[day].then_some(*name))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Parse a YAML workflow definition, validate it, and return the canonical JSON.
@@ -1009,7 +1081,15 @@ mod tests {
     #[test]
     fn normalize_cron_5_fields_prepends_sec_appends_year() {
         let result = normalize_cron("0 9 * * 1-5");
-        assert_eq!(result, "0 0 9 * * 1-5 *");
+        assert_eq!(result, "0 0 9 * * Mon,Tue,Wed,Thu,Fri *");
+    }
+
+    #[test]
+    fn normalize_standard_cron_weekdays_preserves_sunday_and_steps() {
+        assert_eq!(normalize_cron("0 9 * * 0,7"), "0 0 9 * * Sun *");
+        assert_eq!(normalize_cron("0 9 * * 7/2"), "0 0 9 * * Sun *");
+        assert_eq!(normalize_cron("0 9 * * */2"), "0 0 9 * * Sun,Tue,Thu,Sat *");
+        assert_eq!(normalize_cron("0 9 * * 5-7"), "0 0 9 * * Sun,Fri,Sat *");
     }
 
     #[test]

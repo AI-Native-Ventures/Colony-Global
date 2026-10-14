@@ -1386,7 +1386,7 @@ mod postgres_tests {
 
     #[test]
     fn cron_catch_up_uses_the_schedule_timezone() {
-        let watermark = DateTime::parse_from_rfc3339("2026-03-07T00:00:00Z")
+        let watermark = DateTime::parse_from_rfc3339("2026-03-07T07:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
         let now = DateTime::parse_from_rfc3339("2026-03-09T07:00:00Z")

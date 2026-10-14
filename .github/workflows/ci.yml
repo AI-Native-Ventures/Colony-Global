@@ -112,6 +112,14 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA" && echo "$GITHUB_SHA"
       - name: Test Electron renderer selection and host bridge
         run: node --test desktop/scripts/electron-renderer-source.test.mjs desktop/electron/runtime-paths.test.mjs desktop/electron/renderer-host.test.mjs
+      - name: Create compile-only sidecar placeholders
+        run: |
+          target=$(rustc -vV | sed -n 's/^host: //p')
+          test -n "$target"
+          mkdir -p desktop/src-tauri/binaries
+          for sidecar in buzz-acp buzz-agent buzz-backend-kubernetes buzz-dev-mcp git-credential-nostr buzz; do
+            : > "desktop/src-tauri/binaries/${sidecar}-${target}"
+          done
       - name: Compile native host
         run: cargo check --manifest-path desktop/src-tauri/Cargo.toml --bin colony-native-host --features electron-host --locked
 
