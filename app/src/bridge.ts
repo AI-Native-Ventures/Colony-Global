@@ -44,6 +44,32 @@ export function getRelayHttpUrl(): Promise<string> {
   return nativeString("get_relay_http_url");
 }
 
+/** Open only a validated Stripe-hosted payment page in the system browser. */
+export async function openStripeCheckout(url: string): Promise<void> {
+  const parsed = new URL(url);
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== "checkout.stripe.com" ||
+    parsed.username ||
+    parsed.password
+  )
+    throw new Error("The payment page address is invalid.");
+  await nativeInvoke("plugin:opener|open_url", { url: parsed.toString() });
+}
+
+/** Copy a validated checkout link when the browser cannot open. */
+export async function copyStripeCheckout(url: string): Promise<void> {
+  const parsed = new URL(url);
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== "checkout.stripe.com" ||
+    parsed.username ||
+    parsed.password
+  )
+    throw new Error("The payment page address is invalid.");
+  await nativeInvoke("copy_text_to_clipboard", { text: parsed.toString() });
+}
+
 export type NativeIdentity = {
   pubkey: string;
   lost: boolean;

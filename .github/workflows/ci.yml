@@ -102,6 +102,8 @@ jobs:
         run: cargo test -p buzz-relay email_code_sign_in_ --locked -- --ignored --test-threads=1
       - name: Test company creation and shared profile handlers with disposable services
         run: cargo test -p buzz-relay company_entry_ --locked -- --ignored --test-threads=1
+      - name: Test signed Stripe checkout and idempotent credit webhook with disposable services
+        run: cargo test -p buzz-relay stripe_ --locked -- --ignored --test-threads=1
 
   native:
     name: Native host and renderer bridge
@@ -113,7 +115,7 @@ jobs:
       - name: Checked commit
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA" && echo "$GITHUB_SHA"
       - name: Test Electron renderer selection and host bridge
-        run: node --test desktop/scripts/electron-renderer-source.test.mjs desktop/electron/runtime-paths.test.mjs desktop/electron/renderer-host.test.mjs
+        run: node --test desktop/scripts/electron-renderer-source.test.mjs desktop/electron/runtime-paths.test.mjs desktop/electron/renderer-host.test.mjs desktop/electron/shell-plugins.test.mjs
       - name: Create compile-only sidecar placeholders
         run: |
           target=$(rustc -vV | sed -n 's/^host: //p')

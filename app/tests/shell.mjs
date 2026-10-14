@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { after, afterEach, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { finalizeEvent, getPublicKey } from "nostr-tools/pure";
+import { finalizeEvent, getPublicKey, verifyEvent } from "nostr-tools/pure";
 import { preview } from "vite";
 
 const url = "http://127.0.0.1:4318/";
@@ -55,6 +55,12 @@ const defaultProfile = {
   timeZone: "Africa/Johannesburg",
   whatYouSell: "Clothing and fashion",
 };
+const creditPacks = [5, 15, 50, 120].map((amount) => ({
+  id: `usd-${amount}`,
+  chargeMinorUnits: amount * 100,
+  chargeCurrency: "USD",
+  grantUsdCents: amount * 100,
+}));
 
 async function tracedPage(name, viewport = { width: 1440, height: 900 }) {
   const context = await browser.newContext({ viewport });
@@ -106,6 +112,15 @@ async function installMock(page, options = {}) {
         companies: persisted?.companies ?? structuredClone(settings.companies),
         profileEvent: persisted?.profileEvent ?? settings.profileEvent,
         personEvent: persisted?.personEvent ?? settings.personEvent,
+        creditBalanceCents:
+          persisted?.creditBalanceCents ?? settings.creditBalanceCents,
+        creditIntents: persisted?.creditIntents ?? settings.creditIntents,
+        openedUrls: [],
+        copiedLinks: [],
+        openFailure: settings.openFailure,
+        checkoutFailures: persisted?.checkoutFailures ?? [
+          ...settings.checkoutFailures,
+        ],
         companyFailures: [...settings.companyFailures],
         profileSaveFailures: [...settings.profileSaveFailures],
         personSaveFailures: [...settings.personSaveFailures],
@@ -121,6 +136,9 @@ async function installMock(page, options = {}) {
             companies: state.companies,
             profileEvent: state.profileEvent,
             personEvent: state.personEvent,
+            creditBalanceCents: state.creditBalanceCents,
+            creditIntents: state.creditIntents,
+            checkoutFailures: state.checkoutFailures,
           }),
         );
       window.__COLONY_TEST__ = state;
@@ -136,6 +154,15 @@ async function installMock(page, options = {}) {
               return "ws://127.0.0.1:3000";
             case "get_relay_http_url":
               return settings.httpUrl;
+            case "colony_credits_gateway_enabled":
+              return settings.creditsEnabled;
+            case "plugin:opener|open_url":
+              if (state.openFailure) throw new Error("Browser unavailable");
+              state.openedUrls.push(payload.args.url);
+              return null;
+            case "copy_text_to_clipboard":
+              state.copiedLinks.push(payload.args.text);
+              return null;
             case "get_identity":
               return {
                 pubkey: key,
@@ -220,6 +247,66 @@ async function installMock(page, options = {}) {
                 nsec: "nsec1testsecret",
                 created: !settings.existingEmail,
               });
+        }
+        if (path === "/api/credits-gateway/capabilities") {
+          return json(settings.creditCapability);
+        }
+        if (path === "/api/payments/packs") {
+          return json(settings.creditCatalog);
+        }
+        if (path === "/api/payments/history") {
+          return json({ paymentIntents: state.creditIntents });
+        }
+        if (path === "/api/payments/balance") {
+          return json({ balanceUsdCents: state.creditBalanceCents });
+        }
+        if (path === "/api/payments/checkout") {
+          const failure = state.checkoutFailures.shift();
+          if (failure && !failure.afterCommit)
+            return json({ error: failure.code }, failure.status);
+          let intent = state.creditIntents.find(
+            (item) => item.idempotencyKey === body.idempotencyKey,
+          );
+          if (!intent) {
+            intent = {
+              reference: "credit-55555555-5555-4555-8555-555555555555",
+              idempotencyKey: body.idempotencyKey,
+              packId: body.packId,
+              status: "pending",
+              createdAt: new Date().toISOString(),
+            };
+            state.creditIntents.unshift(intent);
+          }
+          persistCompany();
+          if (failure)
+            return json(
+              { error: failure.code, reference: intent.reference },
+              failure.status,
+            );
+          const pack = settings.creditCatalog.packs.find(
+            (item) => item.id === intent.packId,
+          );
+          return json({
+            reference: intent.reference,
+            idempotencyKey: intent.idempotencyKey,
+            status: intent.status,
+            provider: "stripe",
+            currency: "USD",
+            amountMinorUnits:
+              settings.checkoutAmountMinorUnits ?? pack.chargeMinorUnits,
+            grantUsdCents: pack.grantUsdCents,
+            authorizationMethod: "GET",
+            authorizationUrl: settings.checkoutUrl,
+          });
+        }
+        if (path.startsWith("/api/payments/intents/")) {
+          const reference = path.split("/").at(-1);
+          const intent = state.creditIntents.find(
+            (item) => item.reference === reference,
+          );
+          return intent
+            ? json(intent)
+            : json({ error: "unknown_reference" }, 404);
         }
         if (path === "/api/communities/config") {
           return json({
@@ -310,6 +397,29 @@ async function installMock(page, options = {}) {
       networkFailure: options.networkFailure ?? false,
       existingEmail: options.existingEmail ?? false,
       httpUrl: options.httpUrl ?? "http://127.0.0.1:3000",
+      creditsEnabled: options.creditsEnabled ?? false,
+      creditCapability: options.creditCapability ?? {
+        enabled: true,
+        runtime: "colony",
+        model: "server-selected",
+      },
+      creditCatalog: options.creditCatalog ?? {
+        enabled: true,
+        provider: "stripe",
+        packs: creditPacks,
+        policyUrls: {
+          terms: "https://colony.global/terms.html",
+          acceptableUse: "https://colony.global/acceptable-use.html",
+        },
+      },
+      creditBalanceCents: options.creditBalanceCents ?? 0,
+      creditIntents: options.creditIntents ?? [],
+      checkoutUrl:
+        options.checkoutUrl ??
+        "https://checkout.stripe.com/c/pay/cs_test_colony",
+      checkoutAmountMinorUnits: options.checkoutAmountMinorUnits,
+      checkoutFailures: options.checkoutFailures ?? [],
+      openFailure: options.openFailure ?? false,
       importPubkey: options.importPubkey ?? accountPubkey,
       companies:
         options.companies ??
@@ -533,6 +643,7 @@ test("relay and native import failures do not claim sign-in", async () => {
   const page = await tracedPage("service-recovery");
   await installMock(page);
   await page.goto(url);
+  await page.getByRole("heading", { name: "Welcome and sign in" }).waitFor();
   await page.evaluate(() => {
     window.__COLONY_TEST__.networkFailure = true;
   });
@@ -633,6 +744,9 @@ test("rate limits and offline state block duplicate code sends and recover", asy
     true,
   );
   await page.context().setOffline(false);
+  await page.getByText("Connect to the internet to sign in.").waitFor({
+    state: "hidden",
+  });
   await page
     .getByRole("textbox", { name: "Email address" })
     .fill("lerato@example.com");
@@ -734,7 +848,7 @@ test("new owner creates a company and reopens its signed business profile", asyn
   assert.equal(await page.locator("[data-screen-id='O-03']").count(), 1);
   await completeBusiness(page);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("heading", { name: "Power your team" }).waitFor();
   assert.match(
     await page.locator(".titlebar-company").innerText(),
     /Lerato Designs/u,
@@ -774,7 +888,7 @@ test("new owner creates a company and reopens its signed business profile", asyn
     false,
   );
   await page.reload();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("heading", { name: "Power your team" }).waitFor();
   assert.match(
     await page.locator(".titlebar-company").innerText(),
     /Lerato Designs/u,
@@ -784,6 +898,347 @@ test("new owner creates a company and reopens its signed business profile", asyn
       .getByRole("heading", { name: "Tell Scout about your business" })
       .count(),
     0,
+  );
+  await page.close();
+});
+
+test("a new owner reaches the real power choice after saving the business", async () => {
+  const page = await tracedPage("power-choice-after-business");
+  await installMock(page);
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("heading", { name: "Power your team" }).waitFor();
+  assert.equal(await page.locator("[data-screen-id='O-04']").count(), 1);
+  assert.equal(await page.locator("[data-ant-portrait='Scout']").count(), 1);
+  assert.match(
+    await page.locator("main").innerText(),
+    /Choose how to power it/u,
+  );
+  assert.equal(
+    await page.getByRole("radio", { name: /Colony credits/u }).isDisabled(),
+    true,
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      window.__COLONY_TEST__.requests.some(
+        (r) => r.path === "/api/payments/balance",
+      ),
+    ),
+    false,
+  );
+  await page.close();
+});
+
+test("credits stay unavailable without relay capability or secure customer terms", async () => {
+  for (const [name, options] of [
+    [
+      "relay-off",
+      {
+        creditCapability: { enabled: false, runtime: "colony", model: "ready" },
+      },
+    ],
+    [
+      "terms-insecure",
+      {
+        creditCatalog: {
+          enabled: true,
+          provider: "stripe",
+          packs: creditPacks,
+          policyUrls: {
+            terms: "http://colony.global/terms.html",
+            acceptableUse: "https://colony.global/acceptable-use.html",
+          },
+        },
+      },
+    ],
+  ]) {
+    const page = await tracedPage(`credits-gate-${name}`);
+    await installMock(page, { creditsEnabled: true, ...options });
+    await page.goto(url);
+    await signInNewAccount(page);
+    await completeBusiness(page);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("heading", { name: "Power your team" }).waitFor();
+    assert.equal(
+      await page.getByRole("radio", { name: /Colony credits/u }).isDisabled(),
+      true,
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        window.__COLONY_TEST__.requests.some(
+          (request) => request.path === "/api/payments/balance",
+        ),
+      ),
+      false,
+    );
+    await page.close();
+  }
+});
+
+test("power and checkout work by keyboard at the compact desktop size", async () => {
+  const page = await tracedPage("credits-compact-keyboard", {
+    width: 1024,
+    height: 700,
+  });
+  await installMock(page, { creditsEnabled: true });
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("heading", { name: "Power your team" }).waitFor();
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+  );
+  await page.getByRole("button", { name: "Continue to credits" }).focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("heading", { name: "Choose your credits" }).waitFor();
+  const pack = page.getByRole("radio", { name: /\$15\.00/u });
+  await pack.focus();
+  await page.keyboard.press("Space");
+  assert.equal(await pack.isChecked(), true);
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+  );
+  await page.getByRole("button", { name: "Pay in browser" }).focus();
+  await page.keyboard.press("Enter");
+  await page
+    .getByText("Finish paying in your browser", { exact: false })
+    .waitFor();
+  assert.equal(
+    await page.evaluate(() => window.__COLONY_TEST__.creditIntents[0].packId),
+    "usd-15",
+  );
+  await page.close();
+});
+
+test("configured credits show server-priced packs and open one signed Stripe checkout", async () => {
+  const page = await tracedPage("credits-checkout");
+  await installMock(page, { creditsEnabled: true });
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue to credits" }).click();
+  await page.getByRole("heading", { name: "Choose your credits" }).waitFor();
+  assert.equal(await page.getByRole("radio", { name: /\$5\.00/u }).count(), 1);
+  assert.equal(
+    await page.getByRole("radio", { name: /\$120\.00/u }).count(),
+    1,
+  );
+  await page.getByRole("radio", { name: /\$15\.00/u }).check();
+  await page.getByRole("button", { name: "Pay in browser" }).click();
+  await page
+    .getByText("Finish paying in your browser", { exact: false })
+    .waitFor();
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  const checkout = state.requests.find(
+    (request) => request.path === "/api/payments/checkout",
+  );
+  assert.equal(checkout.body.packId, "usd-15");
+  assert.match(checkout.body.idempotencyKey, /^[0-9a-f-]{36}$/iu);
+  assert.match(checkout.authorization, /^Nostr /u);
+  assert.equal(
+    verifyEvent(
+      JSON.parse(
+        Buffer.from(checkout.authorization.slice(6), "base64").toString(),
+      ),
+    ),
+    true,
+  );
+  assert.deepEqual(state.openedUrls, [
+    "https://checkout.stripe.com/c/pay/cs_test_colony",
+  ]);
+  assert.equal(state.creditIntents.length, 1);
+  await page.close();
+});
+
+test("pending payment resumes after restart and reuses its checkout key", async () => {
+  const page = await tracedPage("credits-resume");
+  await installMock(page, { creditsEnabled: true, openFailure: true });
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue to credits" }).click();
+  await page.getByRole("button", { name: "Pay in browser" }).click();
+  await page.getByRole("alert").getByText("didn't open").waitFor();
+  await page.getByRole("button", { name: "Copy the payment link" }).click();
+  assert.equal(
+    (await page.evaluate(() => window.__COLONY_TEST__.copiedLinks)).length,
+    1,
+  );
+  await page.evaluate(() => {
+    window.__COLONY_TEST__.openFailure = false;
+  });
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Open the payment page again" })
+    .waitFor();
+  await page.evaluate(() => {
+    window.__COLONY_TEST__.openFailure = false;
+  });
+  await page
+    .getByRole("button", { name: "Open the payment page again" })
+    .click();
+  await page.waitForFunction(
+    () => window.__COLONY_TEST__.openedUrls.length === 1,
+  );
+  const calls = await page.evaluate(() =>
+    window.__COLONY_TEST__.requests.filter(
+      (request) => request.path === "/api/payments/checkout",
+    ),
+  );
+  assert.equal(calls.length, 1);
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  assert.equal(
+    calls[0].body.idempotencyKey,
+    state.creditIntents[0].idempotencyKey,
+  );
+  await page.close();
+});
+
+test("a lost checkout response recovers the committed intent without a new key", async () => {
+  const page = await tracedPage("credits-lost-response");
+  await installMock(page, {
+    creditsEnabled: true,
+    checkoutFailures: [
+      { status: 503, code: "payment_unavailable", afterCommit: true },
+    ],
+  });
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue to credits" }).click();
+  await page.getByRole("radio", { name: /\$15\.00/u }).check();
+  await page.getByRole("button", { name: "Pay in browser" }).click();
+  await page
+    .getByRole("button", { name: "Open the payment page again" })
+    .waitFor();
+  const original = await page.evaluate(
+    () => window.__COLONY_TEST__.creditIntents[0],
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Open the payment page again" })
+    .click();
+  await page.waitForFunction(
+    () => window.__COLONY_TEST__.openedUrls.length === 1,
+  );
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  const retry = state.requests.filter(
+    (request) => request.path === "/api/payments/checkout",
+  );
+  assert.equal(retry.length, 1);
+  assert.equal(retry[0].body.idempotencyKey, original.idempotencyKey);
+  assert.equal(retry[0].body.packId, "usd-15");
+  assert.equal(state.creditIntents.length, 1);
+  await page.close();
+});
+
+test("cancelled checkout releases its key for one fresh attempt", async () => {
+  const page = await tracedPage("credits-cancelled");
+  await installMock(page, { creditsEnabled: true });
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue to credits" }).click();
+  await page.getByRole("button", { name: "Pay in browser" }).click();
+  const original = await page.evaluate(
+    () => window.__COLONY_TEST__.creditIntents[0].idempotencyKey,
+  );
+  await page.evaluate(() => {
+    window.__COLONY_TEST__.creditIntents[0].status = "cancelled";
+  });
+  await page.getByRole("button", { name: "Check again" }).click();
+  await page.getByRole("button", { name: "Pay in browser" }).waitFor();
+  await page.getByRole("button", { name: "Pay in browser" }).click();
+  await page.waitForFunction(
+    () => window.__COLONY_TEST__.creditIntents.length === 2,
+  );
+  const next = await page.evaluate(
+    () => window.__COLONY_TEST__.creditIntents[0].idempotencyKey,
+  );
+  assert.notEqual(next, original);
+  await page.close();
+});
+
+test("payment is ready only after the server reports paid intent and funded ledger", async () => {
+  const page = await tracedPage("credits-paid-ledger");
+  await installMock(page, { creditsEnabled: true });
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue to credits" }).click();
+  await page.getByRole("button", { name: "Pay in browser" }).click();
+  await page.getByRole("button", { name: "Check again" }).click();
+  assert.equal(
+    await page.getByRole("heading", { name: "Credits are ready" }).count(),
+    0,
+  );
+  await page.evaluate(() => {
+    window.__COLONY_TEST__.creditIntents[0].status = "paid";
+  });
+  await page.getByRole("button", { name: "Check again" }).click();
+  assert.equal(
+    await page.getByRole("heading", { name: "Credits are ready" }).count(),
+    0,
+  );
+  await page.evaluate(() => {
+    window.__COLONY_TEST__.creditBalanceCents = 5000;
+  });
+  await page.getByRole("button", { name: "Check again" }).click();
+  await page.getByRole("heading", { name: "Credits are ready" }).waitFor();
+  assert.match(await page.locator("main").innerText(), /\$50\.00/u);
+  await page.close();
+});
+
+test("an untrusted checkout address cannot open in the browser", async () => {
+  const page = await tracedPage("credits-untrusted-checkout");
+  await installMock(page, {
+    creditsEnabled: true,
+    checkoutUrl: "https://not-stripe.example/c/pay/fake",
+  });
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue to credits" }).click();
+  await page.getByRole("button", { name: "Pay in browser" }).click();
+  await page.getByRole("alert").getByText("couldn't verify").waitFor();
+  assert.deepEqual(
+    await page.evaluate(() => window.__COLONY_TEST__.openedUrls),
+    [],
+  );
+  await page.close();
+});
+
+test("a checkout price that differs from the server catalog cannot open", async () => {
+  const page = await tracedPage("credits-price-mismatch");
+  await installMock(page, {
+    creditsEnabled: true,
+    checkoutAmountMinorUnits: 1,
+  });
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue to credits" }).click();
+  await page.getByRole("button", { name: "Pay in browser" }).click();
+  await page.getByRole("alert").getByText("couldn't verify").waitFor();
+  assert.deepEqual(
+    await page.evaluate(() => window.__COLONY_TEST__.openedUrls),
+    [],
   );
   await page.close();
 });
@@ -814,7 +1269,7 @@ test("failed person profile save keeps the owner draft for retry after reopening
   await page.reload();
   await page.getByRole("heading", { name: "Here's what I have" }).waitFor();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("heading", { name: "Power your team" }).waitFor();
   const state = await page.evaluate(() => window.__COLONY_TEST__);
   assert.equal(JSON.parse(state.personEvent.content).display_name, "Lerato");
   assert.equal(state.companies.length, 1);
@@ -835,7 +1290,7 @@ test("lost person profile response is recovered from the signed relay copy", asy
     }),
   );
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("heading", { name: "Power your team" }).waitFor();
   const state = await page.evaluate(() => window.__COLONY_TEST__);
   assert.equal(JSON.parse(state.personEvent.content).display_name, "Lerato");
   assert.equal(
@@ -859,7 +1314,7 @@ test("company setup preserves an existing signed person profile", async () => {
   await page.goto(url);
   await completeBusiness(page);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("heading", { name: "Power your team" }).waitFor();
   const state = await page.evaluate(() => window.__COLONY_TEST__);
   assert.equal(state.personEvent.id, existing.id);
   assert.equal(
@@ -927,7 +1382,7 @@ test("lost create response recovers the same company without duplicating it", as
   await signInNewAccount(page);
   await completeBusiness(page);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("heading", { name: "Power your team" }).waitFor();
   const state = await page.evaluate(() => window.__COLONY_TEST__);
   assert.equal(state.companies.length, 1);
   assert.equal(
@@ -961,7 +1416,7 @@ test("failed profile write keeps answers and retries without a second company", 
     true,
   );
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("heading", { name: "Power your team" }).waitFor();
   const state = await page.evaluate(() => window.__COLONY_TEST__);
   assert.equal(
     state.requests.filter((request) => request.path === "/api/communities")
