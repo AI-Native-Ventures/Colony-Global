@@ -15,6 +15,7 @@ import {
   type ProvisioningConfig,
 } from "./companyClient";
 import { FirstRun } from "./FirstRun";
+import { PowerEntry } from "./PowerEntry";
 
 type Connection =
   | "checking"
@@ -55,6 +56,10 @@ const headings: Record<Destination, string> = {
   needs: "Needs you",
 };
 
+function powerSetupKey(accountPubkey: string, companyId: string) {
+  return `colony-global-power-setup:${accountPubkey}:${companyId}`;
+}
+
 export default function App() {
   const generation = useRef(0);
   const companyGeneration = useRef(0);
@@ -65,6 +70,9 @@ export default function App() {
   const [companyState, setCompanyState] = useState<CompanyState>({
     kind: "checking",
   });
+  const [powerPending, setPowerPending] = useState(false);
+  const [showPower, setShowPower] = useState(false);
+  const [powerStorageWarning, setPowerStorageWarning] = useState(false);
 
   const connect = useCallback(() => {
     const request = ++generation.current;
@@ -113,8 +121,21 @@ export default function App() {
       try {
         const profile = await context.client.profile(company, context.config);
         if (companyGeneration.current !== request) return;
-        if (profile) setCompanyState({ kind: "ready", company, profile });
-        else if (company.role === "owner")
+        if (profile) {
+          let pending = false;
+          try {
+            pending =
+              company.role === "owner" &&
+              localStorage.getItem(
+                powerSetupKey(account?.pubkey ?? "", company.id),
+              ) === "pending";
+          } catch {
+            /* A server profile remains usable when local setup storage is unavailable. */
+          }
+          setPowerPending(pending);
+          setShowPower(pending);
+          setCompanyState({ kind: "ready", company, profile });
+        } else if (company.role === "owner")
           setCompanyState({ kind: "setup", context, company });
         else
           setCompanyState({
@@ -132,13 +153,15 @@ export default function App() {
         }
       }
     },
-    [],
+    [account?.pubkey],
   );
 
   const refreshCompanies = useCallback(() => {
     if (!relay || !account) return;
     const request = ++companyGeneration.current;
     setCompanyState({ kind: "checking" });
+    setPowerPending(false);
+    setShowPower(false);
     void (async () => {
       try {
         const client = createCompanyClient(relay.httpUrl, account.pubkey);
@@ -248,9 +271,21 @@ export default function App() {
         initialCompany={
           companyState.kind === "setup" ? companyState.company : null
         }
-        onComplete={(company, profile) =>
-          setCompanyState({ kind: "ready", company, profile })
-        }
+        onComplete={(company, profile) => {
+          let warning = false;
+          try {
+            localStorage.setItem(
+              powerSetupKey(account.pubkey, company.id),
+              "pending",
+            );
+          } catch {
+            warning = true;
+          }
+          setPowerStorageWarning(warning);
+          setPowerPending(true);
+          setShowPower(true);
+          setCompanyState({ kind: "ready", company, profile });
+        }}
       />
     );
   }
@@ -300,6 +335,19 @@ export default function App() {
     );
   }
 
+  if (showPower && companyState.company.role === "owner" && relay) {
+    return (
+      <PowerEntry
+        key={`${account.pubkey}:${companyState.company.id}`}
+        accountPubkey={account.pubkey}
+        companyName={companyState.profile.name}
+        relayHttpUrl={relay.httpUrl}
+        onBack={() => setShowPower(false)}
+        storageWarning={powerStorageWarning}
+      />
+    );
+  }
+
   return (
     <ColonyShell
       active={destination}
@@ -327,6 +375,15 @@ export default function App() {
                 ? "The new Colony app is being connected to your company. No work or decisions are shown until they come from the real team."
                 : "This part of Colony is being rebuilt. It will appear when its real company data and actions are ready."}
             </p>
+            {destination === "today" && powerPending && (
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => setShowPower(true)}
+              >
+                Continue team setup
+              </button>
+            )}
           </div>
         </div>
       </div>

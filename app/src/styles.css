@@ -666,6 +666,108 @@ p {
   margin-top: 24px;
 }
 
+.power-entry {
+  width: min(100%, 650px);
+  padding-top: clamp(36px, 6vh, 76px);
+}
+.power-options {
+  display: grid;
+  gap: 12px;
+  margin: 28px 0 18px;
+  padding: 0;
+  border: 0;
+}
+.power-option {
+  display: flex;
+  gap: 15px;
+  align-items: flex-start;
+  padding: 17px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.power-option.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.power-option.disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.power-option input {
+  flex: none;
+  margin-top: 5px;
+  accent-color: var(--accent);
+}
+.power-option span,
+.power-option strong,
+.power-option small,
+.power-option b {
+  display: block;
+}
+.power-option strong {
+  font-size: 0.96rem;
+}
+.power-option small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 450;
+}
+.power-option b {
+  margin-top: 9px;
+  color: var(--accent);
+  font-size: 0.82rem;
+}
+.power-option em {
+  margin-left: 7px;
+  color: var(--accent);
+  font-size: 0.71rem;
+  font-style: normal;
+}
+.power-explain {
+  margin: 8px 0;
+}
+.power-primary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 205px;
+  margin-top: 25px;
+}
+.power-primary:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.power-retry {
+  margin-top: 24px;
+}
+.power-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 25px;
+}
+.secondary-button {
+  padding: 10px 15px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.inline-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: inherit;
+  text-decoration: underline;
+}
+
 @media (max-width: 760px) {
   .first-run-rail {
     flex-basis: 240px;
