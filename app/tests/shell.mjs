@@ -249,6 +249,8 @@ async function installMock(page, options = {}) {
               });
         }
         if (path === "/api/credits-gateway/capabilities") {
+          if (settings.creditCapabilityMissing)
+            return new Response("Not found", { status: 404 });
           return json(settings.creditCapability);
         }
         if (path === "/api/payments/packs") {
@@ -403,6 +405,7 @@ async function installMock(page, options = {}) {
         runtime: "colony",
         model: "server-selected",
       },
+      creditCapabilityMissing: options.creditCapabilityMissing ?? false,
       creditCatalog: options.creditCatalog ?? {
         enabled: true,
         provider: "stripe",
@@ -933,6 +936,7 @@ test("a new owner reaches the real power choice after saving the business", asyn
 
 test("credits stay unavailable without relay capability or secure customer terms", async () => {
   for (const [name, options] of [
+    ["relay-missing", { creditCapabilityMissing: true }],
     [
       "relay-off",
       {
@@ -973,6 +977,8 @@ test("credits stay unavailable without relay capability or secure customer terms
       ),
       false,
     );
+    if (name === "relay-missing")
+      assert.equal(await page.getByRole("alert").count(), 0);
     await page.close();
   }
 });

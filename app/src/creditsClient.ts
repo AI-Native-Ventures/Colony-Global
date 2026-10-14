@@ -220,6 +220,13 @@ export function createCreditsClient(
     } catch {
       throw new CreditsError("network");
     }
+    if (
+      response.status === 404 &&
+      path === "/api/credits-gateway/capabilities"
+    ) {
+      if (response.body) await response.body.cancel().catch(() => undefined);
+      return { result: null, response };
+    }
     return { result: await boundedJson(response), response };
   }
 
