@@ -6,6 +6,14 @@ import {
 } from "./accountClient";
 import { getDefaultRelayUrl, getRelayHttpUrl, getRelayWsUrl } from "./bridge";
 import { ColonyShell, type Destination } from "./ColonyShell";
+import { CompanyEntry, CompanyPicker } from "./CompanyEntry";
+import {
+  type BusinessProfile,
+  type Company,
+  CompanyError,
+  createCompanyClient,
+  type ProvisioningConfig,
+} from "./companyClient";
 import { FirstRun } from "./FirstRun";
 
 type Connection =
@@ -22,6 +30,23 @@ type RelayContext = {
   httpUrl: string;
 };
 
+type CompanyContext = {
+  client: ReturnType<typeof createCompanyClient>;
+  config: ProvisioningConfig;
+};
+
+type CompanyState =
+  | { kind: "checking" }
+  | { kind: "error"; message: string }
+  | { kind: "new"; context: CompanyContext }
+  | {
+      kind: "choose";
+      context: CompanyContext;
+      companies: { company: Company; name: string; available: boolean }[];
+    }
+  | { kind: "setup"; context: CompanyContext; company: Company }
+  | { kind: "ready"; company: Company; profile: BusinessProfile };
+
 const headings: Record<Destination, string> = {
   today: "Today",
   conversations: "Conversations",
@@ -32,10 +57,14 @@ const headings: Record<Destination, string> = {
 
 export default function App() {
   const generation = useRef(0);
+  const companyGeneration = useRef(0);
   const [connection, setConnection] = useState<Connection>("checking");
   const [destination, setDestination] = useState<Destination>("today");
   const [relay, setRelay] = useState<RelayContext | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
+  const [companyState, setCompanyState] = useState<CompanyState>({
+    kind: "checking",
+  });
 
   const connect = useCallback(() => {
     const request = ++generation.current;
@@ -78,6 +107,90 @@ export default function App() {
       generation.current += 1;
     };
   }, [connect]);
+
+  const openCompany = useCallback(
+    async (company: Company, context: CompanyContext, request: number) => {
+      try {
+        const profile = await context.client.profile(company, context.config);
+        if (companyGeneration.current !== request) return;
+        if (profile) setCompanyState({ kind: "ready", company, profile });
+        else if (company.role === "owner")
+          setCompanyState({ kind: "setup", context, company });
+        else
+          setCompanyState({
+            kind: "error",
+            message:
+              "This company is still being set up by its owner. Try again later.",
+          });
+      } catch {
+        if (companyGeneration.current === request) {
+          setCompanyState({
+            kind: "error",
+            message:
+              "Colony couldn't load this company's business profile. Check your connection and try again.",
+          });
+        }
+      }
+    },
+    [],
+  );
+
+  const refreshCompanies = useCallback(() => {
+    if (!relay || !account) return;
+    const request = ++companyGeneration.current;
+    setCompanyState({ kind: "checking" });
+    void (async () => {
+      try {
+        const client = createCompanyClient(relay.httpUrl, account.pubkey);
+        const config = await client.config();
+        const companies = await client.list(config);
+        if (companyGeneration.current !== request) return;
+        const context = { client, config };
+        if (companies.length === 0) setCompanyState({ kind: "new", context });
+        else if (companies.length === 1)
+          await openCompany(companies[0], context, request);
+        else {
+          const named = await Promise.all(
+            companies.map(async (company) => {
+              try {
+                return {
+                  company,
+                  name:
+                    (await client.profile(company, config))?.name ??
+                    "Company being set up",
+                  available: true,
+                };
+              } catch {
+                return {
+                  company,
+                  name: "Company temporarily unavailable",
+                  available: false,
+                };
+              }
+            }),
+          );
+          if (companyGeneration.current === request)
+            setCompanyState({ kind: "choose", context, companies: named });
+        }
+      } catch (error) {
+        if (companyGeneration.current !== request) return;
+        setCompanyState({
+          kind: "error",
+          message:
+            error instanceof CompanyError && error.code === "not_enabled"
+              ? "Company setup isn't available on this Colony service yet. Try again after it is enabled."
+              : "Colony couldn't find your companies. Check your internet and try again.",
+        });
+      }
+    })();
+  }, [account, relay, openCompany]);
+
+  useEffect(() => {
+    if (connection === "signed-in" && account && relay) refreshCompanies();
+    return () => {
+      companyGeneration.current += 1;
+    };
+  }, [connection, account, relay, refreshCompanies]);
 
   if (connection !== "signed-in" || !account) {
     if (connection === "signed-out" && relay) {
@@ -125,8 +238,75 @@ export default function App() {
     );
   }
 
+  if (companyState.kind === "new" || companyState.kind === "setup") {
+    return (
+      <CompanyEntry
+        key={`${account.pubkey}:${companyState.kind === "setup" ? companyState.company.id : "new"}`}
+        accountPubkey={account.pubkey}
+        client={companyState.context.client}
+        config={companyState.context.config}
+        initialCompany={
+          companyState.kind === "setup" ? companyState.company : null
+        }
+        onComplete={(company, profile) =>
+          setCompanyState({ kind: "ready", company, profile })
+        }
+      />
+    );
+  }
+
+  if (companyState.kind === "choose") {
+    return (
+      <CompanyPicker
+        companies={companyState.companies}
+        onRetry={refreshCompanies}
+        onSelect={(company) => {
+          const request = ++companyGeneration.current;
+          setCompanyState({ kind: "checking" });
+          void openCompany(company, companyState.context, request);
+        }}
+      />
+    );
+  }
+
+  if (companyState.kind !== "ready") {
+    return (
+      <main className="startup-state" id="main-content">
+        <div
+          className="state-panel"
+          role={companyState.kind === "error" ? "alert" : "status"}
+        >
+          <h1>
+            {companyState.kind === "checking"
+              ? "Finding your company"
+              : "Your company needs attention"}
+          </h1>
+          <p>
+            {companyState.kind === "checking"
+              ? "Checking the companies linked to your account."
+              : companyState.message}
+          </p>
+          {companyState.kind === "error" && (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={refreshCompanies}
+            >
+              Try again
+            </button>
+          )}
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <ColonyShell active={destination} onNavigate={setDestination} hostReady>
+    <ColonyShell
+      active={destination}
+      onNavigate={setDestination}
+      hostReady
+      companyName={companyState.profile.name}
+    >
       <div className="screen-content">
         <h1>{headings[destination]}</h1>
         <div className="empty-state">

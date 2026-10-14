@@ -100,6 +100,8 @@ jobs:
         run: cargo test -p buzz-backend-kubernetes kubeconfig_multi_document_yaml_keeps_first_context_and_both_clusters --locked
       - name: Test passwordless account handlers with disposable services
         run: cargo test -p buzz-relay email_code_sign_in_ --locked -- --ignored --test-threads=1
+      - name: Test company creation and shared profile handlers with disposable services
+        run: cargo test -p buzz-relay company_entry_ --locked -- --ignored --test-threads=1
 
   native:
     name: Native host and renderer bridge
