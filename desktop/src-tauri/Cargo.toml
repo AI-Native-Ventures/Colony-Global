@@ -99,10 +99,10 @@ tokio-util = { version = "0.7", features = ["rt"] }
 bytes = "1"
 futures-util = "0.3"
 opus = "0.3"
-neteq = { version = "0.8", default-features = false }
+neteq = { version = "=0.8.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
+serde_yaml = { package = "noyalib-serde-yaml", version = "=0.0.57" }
 toml = "0.8"
 nostr = { version = "0.44", features = ["nip44", "nip49"] }
 # OS-entropy source for backup passphrase generation (already in the tree as a

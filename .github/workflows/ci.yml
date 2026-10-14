@@ -1,0 +1,147 @@
+name: Colony Global CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: colony-global-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Source boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Checked commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA" && echo "$GITHUB_SHA"
+      - name: Source contract
+        run: |
+          node --test scripts/check-colony-global-source.test.mjs
+          node scripts/check-colony-global-source.mjs
+
+  app:
+    name: Production app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Checked commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA" && echo "$GITHUB_SHA"
+      - name: Install locked app dependencies
+        run: npm ci --prefix app
+      - name: Lint and typecheck
+        run: |
+          npm run lint --prefix app
+          npm run typecheck --prefix app
+      - name: Build production app
+        run: npm run build --prefix app
+      - name: Install browser
+        run: cd app && npx playwright install --with-deps chromium
+      - name: Exercise shipped shell and recovery
+        run: npm run test:shell --prefix app
+      - name: Upload failed browser traces
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: colony-app-traces-${{ github.sha }}
+          path: app/test-results/
+          if-no-files-found: ignore
+
+  engine:
+    name: Engine and account contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: buzz
+          POSTGRES_PASSWORD: buzz_dev
+          POSTGRES_DB: buzz
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U buzz -d buzz"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://buzz:buzz_dev@localhost:5432/buzz
+      BUZZ_TEST_DATABASE_URL: postgres://buzz:buzz_dev@localhost:5432/buzz
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Checked commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA" && echo "$GITHUB_SHA"
+      - name: Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Compile retained engine and Kubernetes client
+        run: cargo check -p buzz-relay -p buzz-backend-kubernetes --locked
+      - name: Test account, persona and workflow logic
+        run: cargo test -p buzz-auth -p buzz-persona -p buzz-workflow --lib --locked
+      - name: Test safe YAML migration through Kubernetes config
+        run: cargo test -p buzz-backend-kubernetes kubeconfig_multi_document_yaml_keeps_first_context_and_both_clusters --locked
+      - name: Test passwordless account handlers with disposable services
+        run: cargo test -p buzz-relay email_code_sign_in_ --locked -- --ignored --test-threads=1
+
+  native:
+    name: Native host and renderer bridge
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Checked commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA" && echo "$GITHUB_SHA"
+      - name: Test Electron renderer selection and host bridge
+        run: node --test desktop/scripts/electron-renderer-source.test.mjs desktop/electron/runtime-paths.test.mjs desktop/electron/renderer-host.test.mjs
+      - name: Compile native host
+        run: cargo check --manifest-path desktop/src-tauri/Cargo.toml --bin colony-native-host --features electron-host --locked
+
+  security:
+    name: Dependency and source hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+      - uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Checked commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA" && echo "$GITHUB_SHA"
+      - name: Repository source boundary
+        run: node scripts/check-colony-global-source.mjs
+      - name: Scan source history for credentials
+        run: |
+          docker run --rm -v "$PWD:/work:ro" -w /work \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/work \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb \
+            git --no-banner --redact=100 --log-opts=--all .
+      - name: Rust dependency policy
+        run: |
+          cargo-deny check
+          cargo-deny --manifest-path desktop/src-tauri/Cargo.toml \
+            --features electron-host \
+            -t aarch64-apple-darwin -t x86_64-apple-darwin \
+            --exclude-dev check
+      - name: JavaScript production dependency audit
+        run: npm audit --prefix app --omit=dev --audit-level=high

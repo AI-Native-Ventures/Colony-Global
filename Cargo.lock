@@ -951,12 +951,12 @@ dependencies = [
  "hex",
  "nix 0.31.3",
  "nostr 0.44.7",
+ "noyalib-serde-yaml",
  "rcgen",
  "reqwest 0.13.4",
  "rmcp",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.11.0",
  "tempfile",
  "tokio",
@@ -1256,9 +1256,9 @@ dependencies = [
 name = "buzz-persona"
 version = "0.1.0"
 dependencies = [
+ "noyalib-serde-yaml",
  "serde",
  "serde_json",
- "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
 ]
@@ -1361,6 +1361,7 @@ dependencies = [
  "metrics-util",
  "moka",
  "nostr 0.44.7",
+ "noyalib-serde-yaml",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -1373,7 +1374,6 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.11.0",
  "sqlx",
  "subtle",
@@ -1508,10 +1508,10 @@ dependencies = [
  "hex",
  "moka",
  "nostr 0.44.7",
+ "noyalib-serde-yaml",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
- "serde_yaml",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4059,6 +4059,8 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -4521,8 +4523,6 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4987d57a184d2b5294fdad3d7fc7f278899469d21a4da39a8f6ca16426567a36"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4540,12 +4540,12 @@ dependencies = [
  "jsonpath-rust",
  "k8s-openapi",
  "kube-core",
+ "noyalib-serde-yaml",
  "pem",
  "rustls",
  "secrecy",
  "serde",
  "serde_json",
- "serde_yaml",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -6110,6 +6110,30 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "universal-time",
+]
+
+[[package]]
+name = "noyalib"
+version = "0.0.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70b8960f9f4668b69cae4ca71106c84d38ca1ea9f41a9acc20ce55473b967849"
+dependencies = [
+ "hashbrown 0.17.1",
+ "indexmap",
+ "libm",
+ "memchr",
+ "rustc-hash",
+ "serde_core",
+ "smallvec",
+]
+
+[[package]]
+name = "noyalib-serde-yaml"
+version = "0.0.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da3c0f67a13749c254e5e1ad26ffbd1fb924ca4732546acb0c9aa638d3471a6a"
+dependencies = [
+ "noyalib",
 ]
 
 [[package]]
@@ -8725,19 +8749,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_yaml"
-version = "0.9.34+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
-dependencies = [
- "indexmap",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
-]
-
-[[package]]
 name = "serdect"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10634,12 +10645,6 @@ name = "universal-time"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47a939edecc3c5a7b83c02e5f6b3c31d2bc69eabcc9a87ab12c6d37ee6dbc856"
-
-[[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

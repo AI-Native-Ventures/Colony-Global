@@ -1,5 +1,8 @@
 export interface ColonyDesktopBridge {
-  request(type: "invoke", payload: { command: string; args: Record<string, never> }): Promise<unknown>;
+  request(
+    type: "invoke",
+    payload: { command: string; args: Record<string, never> },
+  ): Promise<unknown>;
 }
 
 declare global {

@@ -6,21 +6,23 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4318",
     "build": "tsc --noEmit && vite build",
+    "lint": "biome check src tests vite.config.ts",
     "typecheck": "tsc --noEmit",
     "test:shell": "node tests/shell.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4318"
   },
   "dependencies": {
+    "lucide-react": "0.468.0",
     "react": "19.1.0",
-    "react-dom": "19.1.0",
-    "lucide-react": "0.468.0"
+    "react-dom": "19.1.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.6",
     "@types/react": "19.1.8",
     "@types/react-dom": "19.1.6",
     "@vitejs/plugin-react": "4.4.1",
+    "playwright": "1.62.1",
     "typescript": "5.8.3",
-    "vite": "6.3.5",
-    "playwright": "1.62.1"
+    "vite": "6.3.5"
   }
 }

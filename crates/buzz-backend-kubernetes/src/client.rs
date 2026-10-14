@@ -179,4 +179,30 @@ mod tests {
         assert!(resolves_on_path("/bin/sh"));
         assert!(!resolves_on_path("/nonexistent/plugin-binary"));
     }
+
+    #[test]
+    fn kubeconfig_multi_document_yaml_keeps_first_context_and_both_clusters() {
+        let yaml = r#"apiVersion: v1
+kind: Config
+current-context: first
+clusters:
+  - name: first
+    cluster:
+      server: https://first.example
+---
+apiVersion: v1
+kind: Config
+current-context: second
+clusters:
+  - name: second
+    cluster:
+      server: https://second.example
+"#;
+        let config = Kubeconfig::from_yaml(yaml).expect("parse and merge kubeconfig documents");
+        assert_eq!(config.current_context.as_deref(), Some("first"));
+        assert_eq!(config.clusters.len(), 2);
+        assert_eq!(config.clusters[0].name, "first");
+        assert_eq!(config.clusters[1].name, "second");
+        assert!(Kubeconfig::from_yaml("clusters: [\n").is_err());
+    }
 }

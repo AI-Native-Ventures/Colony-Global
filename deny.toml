@@ -1,5 +1,15 @@
 [advisories]
 ignore = [
+    # Inherited macOS native host. These are tracked in SECURITY-BASELINE.md;
+    # none replaces the unsafe-libyaml parser, which was removed outright.
+    { id = "RUSTSEC-2026-0150", reason = "desktop opus 0.3 depends on unmaintained audiopus_sys; audio is not exposed by the new app yet" },
+    { id = "RUSTSEC-2020-0168", reason = "desktop user-idle and IOKit depend on unmaintained mach; no upstream replacement in current host" },
+    { id = "RUSTSEC-2026-0293", reason = "neteq 0.8.3 declares ringbuf 0.3 but contains no ringbuf source use; remove with the legacy audio stack" },
+    { id = "RUSTSEC-2025-0081", reason = "Tauri urlpattern depends on unmaintained rust-unic; no safe version upgrade" },
+    { id = "RUSTSEC-2025-0075", reason = "Tauri urlpattern depends on unmaintained rust-unic; no safe version upgrade" },
+    { id = "RUSTSEC-2025-0080", reason = "Tauri urlpattern depends on unmaintained rust-unic; no safe version upgrade" },
+    { id = "RUSTSEC-2025-0100", reason = "Tauri urlpattern depends on unmaintained rust-unic; no safe version upgrade" },
+    { id = "RUSTSEC-2025-0098", reason = "Tauri urlpattern depends on unmaintained rust-unic; no safe version upgrade" },
     # instant 0.1.13 — unmaintained crate. Transitive dep: nostr → instant.
     # Will be resolved when nostr crate updates its dependencies.
     { id = "RUSTSEC-2024-0384", reason = "transitive dep via nostr; no upstream fix available" },

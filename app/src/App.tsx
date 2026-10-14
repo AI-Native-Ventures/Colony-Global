@@ -32,30 +32,50 @@ export default function App() {
 
   useEffect(() => {
     connect();
-    return () => { generation.current += 1; };
+    return () => {
+      generation.current += 1;
+    };
   }, [connect]);
 
   return (
-    <ColonyShell active={destination} onNavigate={setDestination} connected={connection === "ready"}>
+    <ColonyShell
+      active={destination}
+      onNavigate={setDestination}
+      hostReady={connection === "ready"}
+    >
       <div className="screen-content">
         {connection === "checking" ? (
-          <div className="state-panel" role="status">
-            <h1>Connecting to Colony</h1>
-            <p>Checking the connection to your team computer.</p>
-          </div>
+          <output className="state-panel">
+            <h1>Starting Colony</h1>
+            <p>Checking the desktop host.</p>
+          </output>
         ) : connection === "unavailable" ? (
           <div className="state-panel" role="alert">
-            <h1>Colony can't connect</h1>
-            <p>Colony could not reach the team computer. Try again, or quit and reopen the app.</p>
-            <button className="primary-button" onClick={connect}>Try again</button>
+            <h1>Colony host unavailable</h1>
+            <p>
+              The desktop host did not respond. Try again, or quit and reopen
+              the app.
+            </p>
+            <button type="button" className="primary-button" onClick={connect}>
+              Try again
+            </button>
           </div>
         ) : (
           <>
             <h1>{headings[destination]}</h1>
             <div className="empty-state">
-              <span className="scout-portrait" role="img" aria-label="Scout, AI-made ant portrait" data-ant-portrait="Scout" />
+              <span
+                className="scout-portrait"
+                role="img"
+                aria-label="Scout, AI-made ant portrait"
+                data-ant-portrait="Scout"
+              />
               <div>
-                <h2>{destination === "today" ? "Your team will meet you here" : `${headings[destination]} is being rebuilt`}</h2>
+                <h2>
+                  {destination === "today"
+                    ? "Your team will meet you here"
+                    : `${headings[destination]} is being rebuilt`}
+                </h2>
                 <p>
                   {destination === "today"
                     ? "The new Colony app is being connected to your company. No work or decisions are shown until they come from the real team."

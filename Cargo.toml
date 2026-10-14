@@ -79,7 +79,7 @@ postcard    = { version = "1", default-features = false, features = ["use-std"] 
 # Inter-relay mesh transport (buzz-relay-mesh)
 iroh = { version = "1.0.0-rc.0", default-features = false, features = ["tls-ring"] }
 serde_json  = { version = "1", features = ["raw_value"] }
-serde_yaml  = "0.9"
+serde_yaml  = { package = "noyalib-serde-yaml", version = "=0.0.57" }
 evalexpr    = "11"
 cron        = "0.16"
 # Observability
@@ -188,3 +188,4 @@ strip = true
 # allowlist for the auth token). Revert to crates.io once #449 lands upstream.
 [patch.crates-io]
 aws-creds = { git = "https://github.com/tlongwell-block/rust-s3", rev = "c9fce3620dd434c1f810101d672cf384268dbb0f" }
+kube-client = { path = "vendor/kube-client" }

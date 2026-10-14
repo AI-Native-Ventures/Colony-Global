@@ -2,7 +2,12 @@ import { Home, MessageCircle, Settings, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { AntMark } from "./AntMark";
 
-export type Destination = "today" | "conversations" | "team" | "settings" | "needs";
+export type Destination =
+  | "today"
+  | "conversations"
+  | "team"
+  | "settings"
+  | "needs";
 
 const destinations = [
   { id: "today", label: "Today", icon: Home },
@@ -14,29 +19,37 @@ const destinations = [
 export function ColonyShell({
   active,
   onNavigate,
-  connected,
+  hostReady,
   children,
 }: {
   active: Destination;
   onNavigate: (destination: Destination) => void;
-  connected: boolean;
+  hostReady: boolean;
   children: ReactNode;
 }) {
   return (
     <div className="app-frame" data-product-ui="colony-global">
-      <a className="skip-link" href="#main-content">Skip to content</a>
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       <header className="titlebar">
         <span className="titlebar-company">Colony</span>
       </header>
       <div className="app-workroom">
         <aside className="sidebar">
-          <button className="brand" aria-label="Colony, Today" onClick={() => onNavigate("today")}>
+          <button
+            type="button"
+            className="brand"
+            aria-label="Colony, Today"
+            onClick={() => onNavigate("today")}
+          >
             <AntMark />
             <strong>Colony</strong>
           </button>
           <nav aria-label="Main navigation">
             {destinations.map(({ id, label, icon: Icon }) => (
               <button
+                type="button"
                 className={`nav-item${active === id ? " active" : ""}`}
                 key={id}
                 aria-current={active === id ? "page" : undefined}
@@ -47,11 +60,14 @@ export function ColonyShell({
               </button>
             ))}
             <button
+              type="button"
               className={`nav-item needs-nav${active === "needs" ? " active" : ""}`}
               aria-current={active === "needs" ? "page" : undefined}
               onClick={() => onNavigate("needs")}
             >
-              <span className="needs-icon" aria-hidden="true">✓</span>
+              <span className="needs-icon" aria-hidden="true">
+                ✓
+              </span>
               <span>Needs you</span>
             </button>
           </nav>
@@ -60,13 +76,19 @@ export function ColonyShell({
               <span className="team-orbit" aria-hidden="true" />
               <span>
                 <strong>Team</strong>
-                <small>{connected ? "Computer connected" : "Computer connection needed"}</small>
+                <small>
+                  {hostReady
+                    ? "Desktop host ready"
+                    : "Desktop host unavailable"}
+                </small>
               </span>
             </div>
           </div>
         </aside>
         <div className="content-frame">
-          <main id="main-content" className="main-content" tabIndex={-1}>{children}</main>
+          <main id="main-content" className="main-content" tabIndex={-1}>
+            {children}
+          </main>
         </div>
       </div>
     </div>
