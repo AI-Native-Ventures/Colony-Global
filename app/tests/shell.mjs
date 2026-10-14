@@ -3,12 +3,44 @@ import { mkdirSync } from "node:fs";
 import { after, afterEach, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { finalizeEvent, getPublicKey } from "nostr-tools/pure";
 import { preview } from "vite";
 
 const url = "http://127.0.0.1:4318/";
 let server;
 let browser;
 const tracedContexts = [];
+const relaySecret = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+const relaySelf = getPublicKey(relaySecret);
+const defaultCompany = {
+  id: "11111111-1111-4111-8111-111111111111",
+  slug: "lerato-designs",
+  normalized_host: "lerato-designs.colony.example.test",
+  owner_pubkey: "a".repeat(64),
+  role: "owner",
+};
+
+function profileEvent(profile, revision = 1) {
+  return finalizeEvent(
+    {
+      kind: 30657,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ["d", "business-profile"],
+        ["revision", String(revision)],
+      ],
+      content: JSON.stringify(profile),
+    },
+    relaySecret,
+  );
+}
+
+const defaultProfile = {
+  schemaVersion: 1,
+  name: "Lerato Designs",
+  timeZone: "Africa/Johannesburg",
+  whatYouSell: "Clothing and fashion",
+};
 
 async function tracedPage(name, viewport = { width: 1440, height: 900 }) {
   const context = await browser.newContext({ viewport });
@@ -18,6 +50,9 @@ async function tracedPage(name, viewport = { width: 1440, height: 900 }) {
 }
 
 async function installMock(page, options = {}) {
+  await page.exposeFunction("__COLONY_SIGN_PROFILE__", (profile) =>
+    profileEvent(profile),
+  );
   await page.addInitScript(
     (settings) => {
       const key = "a".repeat(64);
@@ -28,10 +63,13 @@ async function installMock(page, options = {}) {
         has_password: false,
         google_linked: false,
       };
+      const persisted = JSON.parse(
+        sessionStorage.getItem("__mock_relay_company") || "null",
+      );
       const state = {
         commands: [],
         requests: [],
-        account: settings.initialAccount,
+        account: persisted?.account ?? settings.initialAccount,
         policy: settings.policy,
         hostFailures: settings.hostFailures,
         policyFailures: settings.policyFailures,
@@ -40,7 +78,21 @@ async function installMock(page, options = {}) {
         networkFailure: settings.networkFailure,
         importFailure: false,
         imported: false,
+        companies: persisted?.companies ?? structuredClone(settings.companies),
+        profileEvent: persisted?.profileEvent ?? settings.profileEvent,
+        companyFailures: [...settings.companyFailures],
+        profileSaveFailures: [...settings.profileSaveFailures],
+        createFailures: [...settings.createFailures],
       };
+      const persistCompany = () =>
+        sessionStorage.setItem(
+          "__mock_relay_company",
+          JSON.stringify({
+            account: state.account,
+            companies: state.companies,
+            profileEvent: state.profileEvent,
+          }),
+        );
       window.__COLONY_TEST__ = state;
       window.colonyDesktop = {
         request: async (type, payload) => {
@@ -67,7 +119,7 @@ async function installMock(page, options = {}) {
                 pubkey: key,
                 kind: payload.args.kind,
                 tags: payload.args.tags,
-                content: "",
+                content: payload.args.content,
                 created_at: 1,
                 sig: "signed-in-native-host",
               });
@@ -80,6 +132,7 @@ async function installMock(page, options = {}) {
                 throw new Error("Wrong key");
               state.imported = true;
               state.account = true;
+              persistCompany();
               return {
                 pubkey: settings.importPubkey,
                 lost: false,
@@ -94,7 +147,12 @@ async function installMock(page, options = {}) {
       const realFetch = window.fetch.bind(window);
       window.fetch = async (input, init) => {
         const target = typeof input === "string" ? input : input.url;
-        if (!target.startsWith("http://127.0.0.1:3000/")) {
+        if (
+          !target.startsWith("http://127.0.0.1:3000/") &&
+          !target.startsWith("https://lerato-designs.colony.example.test/") &&
+          !target.endsWith(".colony.example.test/") &&
+          !target.includes(".colony.example.test/")
+        ) {
           return realFetch(input, init);
         }
         const path = new URL(target).pathname;
@@ -104,6 +162,7 @@ async function installMock(page, options = {}) {
           method: init?.method,
           body,
           authorization: init?.headers?.Authorization,
+          target,
         });
         if (state.networkFailure) throw new TypeError("Relay unavailable");
         const json = (value, status = 200) => Response.json(value, { status });
@@ -138,6 +197,60 @@ async function installMock(page, options = {}) {
                 created: !settings.existingEmail,
               });
         }
+        if (path === "/api/communities/config") {
+          return json({
+            self_serve: true,
+            domain: "colony.example.test",
+            public: true,
+            max_per_owner: 5,
+          });
+        }
+        if (path === "/api/communities/mine") {
+          const next = state.companyFailures.shift();
+          if (next) return json({ error: next.code }, next.status);
+          return json({ owner_pubkey: key, communities: state.companies });
+        }
+        if (path === "/api/communities") {
+          const next = state.createFailures.shift();
+          if (next && !next.afterCommit)
+            return json({ error: next.code }, next.status);
+          const company = {
+            id: "22222222-2222-4222-8222-222222222222",
+            slug: body.name,
+            normalized_host: `${body.name}.colony.example.test`,
+            owner_pubkey: key,
+            role: "owner",
+          };
+          state.companies.push(company);
+          persistCompany();
+          if (next) return json({ error: next.code }, next.status);
+          return json({ community: company });
+        }
+        if (path === "/" && target.includes(".colony.example.test")) {
+          return json({ self: settings.relaySelf });
+        }
+        if (path === "/query") {
+          return json(state.profileEvent ? [state.profileEvent] : []);
+        }
+        if (path === "/events") {
+          const next = state.profileSaveFailures.shift();
+          if (next) return json({ error: next.code }, next.status);
+          const action = JSON.parse(body.content);
+          state.profileEvent = await window.__COLONY_SIGN_PROFILE__({
+            ...action.profile,
+            bestSellers: [],
+            voiceWords: [],
+            contact: {},
+            invoice: {},
+            socialAccounts: {},
+          });
+          persistCompany();
+          return json({
+            event_id: body.id,
+            accepted: true,
+            message: 'response:{"revision":1}',
+          });
+        }
         throw new Error(`Unexpected relay path ${path}`);
       };
     },
@@ -152,6 +265,21 @@ async function installMock(page, options = {}) {
       existingEmail: options.existingEmail ?? false,
       httpUrl: options.httpUrl ?? "http://127.0.0.1:3000",
       importPubkey: options.importPubkey ?? "a".repeat(64),
+      companies:
+        options.companies ??
+        (options.initialAccount || options.existingEmail
+          ? [defaultCompany]
+          : []),
+      profileEvent:
+        options.profileEvent === undefined
+          ? options.initialAccount || options.existingEmail
+            ? profileEvent(defaultProfile)
+            : null
+          : options.profileEvent,
+      relaySelf,
+      companyFailures: options.companyFailures ?? [],
+      profileSaveFailures: options.profileSaveFailures ?? [],
+      createFailures: options.createFailures ?? [],
     },
   );
 }
@@ -160,6 +288,43 @@ async function enterCode(page, email = "lerato@example.com") {
   await page.getByRole("textbox", { name: "Email address" }).fill(email);
   await page.getByRole("button", { name: "Continue with email" }).click();
   await page.getByRole("heading", { name: "Email code" }).waitFor();
+}
+
+async function signInNewAccount(page) {
+  await enterCode(page);
+  await page.getByRole("textbox", { name: "6-digit code" }).fill("482913");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page
+    .getByRole("heading", { name: "Tell Scout about your business" })
+    .waitFor();
+  if (process.env.COLONY_COMPANY_ENTRY_SHOT) {
+    await page.screenshot({ path: process.env.COLONY_COMPANY_ENTRY_SHOT });
+  }
+}
+
+async function completeBusiness(page) {
+  await page.getByRole("textbox", { name: "Your name" }).fill("Lerato");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Business name" })
+    .fill("Lerato Designs");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Clothing and fashion" }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  for (let index = 0; index < 2; index++) {
+    await page.getByRole("button", { name: "Skip for now" }).click();
+  }
+  await page
+    .getByRole("textbox", { name: "Links or @names" })
+    .fill("https://leratodesigns.co.za @leratodesigns");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "City and country" })
+    .fill("Johannesburg, South Africa");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "More sales" }).click();
+  await page.getByRole("button", { name: "Review answers" }).click();
+  await page.getByRole("heading", { name: "Here's what I have" }).waitFor();
 }
 
 before(async () => {
@@ -234,7 +399,9 @@ test("new account enters email code and imports the verified identity", async ()
   assert.equal(await page.locator("[data-screen-id='O-02']").count(), 1);
   await page.getByRole("textbox", { name: "6-digit code" }).fill("482913");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page
+    .getByRole("heading", { name: "Tell Scout about your business" })
+    .waitFor();
   const state = await page.evaluate(() => ({
     calls: window.__COLONY_TEST__.requests,
     commands: window.__COLONY_TEST__.commands,
@@ -306,7 +473,9 @@ test("wrong and expired codes stay recoverable", async () => {
     .waitFor();
   await page.getByRole("textbox", { name: "6-digit code" }).fill("482913");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page
+    .getByRole("heading", { name: "Tell Scout about your business" })
+    .waitFor();
   await page.close();
 });
 
@@ -384,7 +553,9 @@ test("policy and age gate precede sending a code", async () => {
   await enterCode(page);
   await page.getByRole("textbox", { name: "6-digit code" }).fill("482913");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page
+    .getByRole("heading", { name: "Tell Scout about your business" })
+    .waitFor();
   const verify = await page.evaluate(() =>
     window.__COLONY_TEST__.requests.find(
       (r) => r.path === "/api/accounts/code/verify",
@@ -503,4 +674,211 @@ test("missing and restarting native hosts remain recoverable", async () => {
   await retry.getByRole("button", { name: "Try again" }).click();
   await retry.getByRole("heading", { name: "Today" }).waitFor();
   await retry.close();
+});
+
+test("new owner creates a company and reopens its signed business profile", async () => {
+  const page = await tracedPage("company-create-reopen");
+  await installMock(page);
+  await page.goto(url);
+  await signInNewAccount(page);
+  assert.equal(await page.locator("[data-screen-id='O-03']").count(), 1);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  assert.match(
+    await page.locator(".titlebar-company").innerText(),
+    /Lerato Designs/u,
+  );
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  const created = state.requests.find(
+    (request) => request.path === "/api/communities",
+  );
+  const saved = state.requests.find((request) => request.path === "/events");
+  assert.match(created.authorization, /^Nostr /u);
+  assert.match(saved.authorization, /^Nostr /u);
+  assert.equal(JSON.parse(saved.body.content).profile.name, "Lerato Designs");
+  assert.deepEqual(JSON.parse(saved.body.content).profile.links, [
+    "https://leratodesigns.co.za",
+    "@leratodesigns",
+  ]);
+  assert.equal(JSON.parse(saved.body.content).expectedRevision, null);
+  assert.equal(state.profileEvent.pubkey, relaySelf);
+  assert.equal(
+    state.requests.some((request) => request.path === "/query"),
+    true,
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      Object.keys(localStorage).some((key) =>
+        key.startsWith("colony-global-business-draft:"),
+      ),
+    ),
+    false,
+  );
+  await page.reload();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  assert.match(
+    await page.locator(".titlebar-company").innerText(),
+    /Lerato Designs/u,
+  );
+  assert.equal(
+    await page
+      .getByRole("heading", { name: "Tell Scout about your business" })
+      .count(),
+    0,
+  );
+  await page.close();
+});
+
+test("unfinished owner answers resume after reopening", async () => {
+  const page = await tracedPage("company-draft-reopen");
+  await installMock(page);
+  await page.goto(url);
+  await signInNewAccount(page);
+  await page.getByRole("textbox", { name: "Your name" }).fill("Lerato");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Business name" })
+    .fill("Lerato Designs");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByText("3 of 8").waitFor();
+  await page.waitForFunction(
+    () => window.__COLONY_TEST__.companies.length === 1,
+  );
+  await page.reload();
+  await page
+    .getByRole("heading", { name: "Tell Scout about your business" })
+    .waitFor();
+  assert.equal(await page.getByText("3 of 8").count(), 1);
+  assert.equal(await page.getByText("Nice. What do you sell?").count(), 1);
+  assert.equal(await page.getByRole("heading", { name: "Today" }).count(), 0);
+  await page.close();
+});
+
+test("lost create response recovers the same company without duplicating it", async () => {
+  const page = await tracedPage("company-create-recovery");
+  await installMock(page, {
+    createFailures: [{ status: 503, code: "unavailable", afterCommit: true }],
+  });
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  assert.equal(state.companies.length, 1);
+  assert.equal(
+    state.requests.filter((request) => request.path === "/api/communities")
+      .length,
+    1,
+  );
+  await page.close();
+});
+
+test("failed profile write keeps answers and retries without a second company", async () => {
+  const page = await tracedPage("company-profile-retry");
+  await installMock(page);
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.evaluate(() =>
+    window.__COLONY_TEST__.profileSaveFailures.push({
+      status: 503,
+      code: "unavailable",
+    }),
+  );
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page
+    .getByRole("alert")
+    .getByText("couldn't save your business")
+    .waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Today" }).count(), 0);
+  assert.equal(
+    (await page.getByText("Lerato Designs", { exact: true }).count()) > 0,
+    true,
+  );
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  assert.equal(
+    state.requests.filter((request) => request.path === "/api/communities")
+      .length,
+    1,
+  );
+  assert.equal(
+    state.requests.filter((request) => request.path === "/events").length,
+    2,
+  );
+  await page.close();
+});
+
+test("failed membership discovery never opens a fixture company", async () => {
+  const page = await tracedPage("company-discovery-retry");
+  await installMock(page, {
+    initialAccount: true,
+    companyFailures: [{ status: 503, code: "unavailable" }],
+  });
+  await page.goto(url);
+  await page
+    .getByRole("heading", { name: "Your company needs attention" })
+    .waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Today" }).count(), 0);
+  await page.getByRole("button", { name: "Try again" }).click();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.close();
+});
+
+test("multiple memberships require a choice and members cannot create a missing profile", async () => {
+  const second = {
+    ...defaultCompany,
+    id: "33333333-3333-4333-8333-333333333333",
+    slug: "another-shop",
+    normalized_host: "another-shop.colony.example.test",
+  };
+  const choice = await tracedPage("company-choice");
+  await installMock(choice, {
+    initialAccount: true,
+    companies: [defaultCompany, second],
+  });
+  await choice.goto(url);
+  await choice.getByRole("heading", { name: "Choose a company" }).waitFor();
+  await choice.getByRole("button", { name: "Lerato Designs" }).first().click();
+  await choice.getByRole("heading", { name: "Today" }).waitFor();
+  await choice.close();
+
+  const member = await tracedPage("company-member-permission");
+  await installMock(member, {
+    initialAccount: true,
+    companies: [
+      { ...defaultCompany, owner_pubkey: "b".repeat(64), role: "member" },
+    ],
+    profileEvent: null,
+  });
+  await member.goto(url);
+  await member
+    .getByRole("heading", { name: "Your company needs attention" })
+    .waitFor();
+  assert.equal(
+    await member
+      .getByRole("heading", { name: "Tell Scout about your business" })
+      .count(),
+    0,
+  );
+  await member.close();
+});
+
+test("a tampered business profile cannot open the company", async () => {
+  const forged = {
+    ...profileEvent(defaultProfile),
+    content: JSON.stringify({ ...defaultProfile, name: "Fake company" }),
+  };
+  const page = await tracedPage("company-profile-signature");
+  await installMock(page, { initialAccount: true, profileEvent: forged });
+  await page.goto(url);
+  await page
+    .getByRole("heading", { name: "Your company needs attention" })
+    .waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Today" }).count(), 0);
+  assert.equal(await page.getByText("Fake company").count(), 0);
+  await page.close();
 });

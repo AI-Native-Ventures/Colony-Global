@@ -20,11 +20,13 @@ export function ColonyShell({
   active,
   onNavigate,
   hostReady,
+  companyName,
   children,
 }: {
   active: Destination;
   onNavigate: (destination: Destination) => void;
   hostReady: boolean;
+  companyName: string;
   children: ReactNode;
 }) {
   return (
@@ -33,7 +35,7 @@ export function ColonyShell({
         Skip to content
       </a>
       <header className="titlebar">
-        <span className="titlebar-company">Colony</span>
+        <span className="titlebar-company">{companyName} · Colony</span>
       </header>
       <div className="app-workroom">
         <aside className="sidebar">

@@ -48,6 +48,8 @@ async fn test_state(
 
     let host = format!("self-serve-{}.example", Uuid::new_v4().simple());
     config.relay_url = format!("wss://{host}");
+    let relay_keys = Keys::generate();
+    config.relay_private_key = Some(relay_keys.secret_key().to_secret_hex());
 
     let pool = PgPool::connect(&database_url)
         .await
@@ -90,7 +92,7 @@ async fn test_state(
         auth,
         search,
         workflow_engine,
-        Keys::generate(),
+        relay_keys,
         media_storage,
     );
     state.nip98_replay = Arc::new(AlwaysFreshReplayGuard);
@@ -309,6 +311,127 @@ async fn create_grants_owner_membership_and_mine_lists_it() {
     )
     .await;
     assert_eq!(wrong_query.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn company_entry_creates_and_reads_shared_profile() {
+    let (state, _pool, ingress_host, domain) = test_state(true, 3, 50).await;
+    let owner = Keys::generate();
+    let slug = format!("company-{}", Uuid::new_v4().simple());
+    let created = create_request(
+        state.clone(),
+        &owner,
+        &ingress_host,
+        &slug,
+        Some("198.51.100.40"),
+    )
+    .await;
+    assert_eq!(created.status(), StatusCode::OK);
+    let created = response_json(created).await;
+    let company_host = format!("{slug}.{domain}");
+    assert_eq!(created["community"]["normalized_host"], company_host);
+
+    let info = build_router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::HOST, company_host.as_str())
+                .header(header::ACCEPT, "application/nostr+json")
+                .body(Body::empty())
+                .expect("build NIP-11 request"),
+        )
+        .await
+        .expect("get company relay identity");
+    assert_eq!(info.status(), StatusCode::OK);
+    let info = response_json(info).await;
+    assert_eq!(info["self"], state.relay_keypair.public_key().to_hex());
+
+    let profile = serde_json::json!({
+        "schemaVersion": 1,
+        "name": "Lerato Designs",
+        "timeZone": "Africa/Johannesburg",
+        "whatYouSell": "Clothing and fashion",
+        "whereYouSell": ["Instagram"],
+        "links": ["https://leratodesigns.co.za"],
+    });
+    let action = EventBuilder::new(
+        Kind::Custom(47046),
+        serde_json::json!({ "profile": profile, "expectedRevision": null }).to_string(),
+    )
+    .tags([Tag::parse(["d", "business-profile"]).expect("d tag")])
+    .sign_with_keys(&owner)
+    .expect("sign profile action");
+    let write = signed_request(
+        state.clone(),
+        &owner,
+        &company_host,
+        "POST",
+        "/events",
+        Some(serde_json::to_string(&action).expect("serialize action")),
+        None,
+    )
+    .await;
+    assert_eq!(write.status(), StatusCode::OK);
+    let write = response_json(write).await;
+    assert_eq!(write["accepted"], true);
+    assert_eq!(write["event_id"], action.id.to_hex());
+
+    let query = serde_json::json!([{
+        "kinds": [30657],
+        "authors": [state.relay_keypair.public_key().to_hex()],
+        "#d": ["business-profile"],
+        "limit": 10,
+    }]);
+    let read = signed_request(
+        state.clone(),
+        &owner,
+        &company_host,
+        "POST",
+        "/query",
+        Some(query.to_string()),
+        None,
+    )
+    .await;
+    assert_eq!(read.status(), StatusCode::OK);
+    let read = response_json(read).await;
+    let heads = read.as_array().expect("profile head array");
+    assert_eq!(heads.len(), 1);
+    let head: nostr::Event = serde_json::from_value(heads[0].clone()).expect("signed head");
+    assert!(head.verify().is_ok());
+    assert_eq!(head.pubkey, state.relay_keypair.public_key());
+    assert!(head
+        .tags
+        .iter()
+        .any(|tag| { tag.kind().to_string() == "d" && tag.content() == Some("business-profile") }));
+    let saved: Value = serde_json::from_str(&head.content).expect("profile content");
+    for field in ["name", "timeZone", "whatYouSell", "whereYouSell", "links"] {
+        assert_eq!(saved[field], profile[field], "saved field {field}");
+    }
+
+    let second_member = Keys::generate();
+    add_member(&state, &company_host, &second_member).await;
+    let denied_action = EventBuilder::new(
+        Kind::Custom(47046),
+        serde_json::json!({ "profile": profile, "expectedRevision": 1 }).to_string(),
+    )
+    .tags([Tag::parse(["d", "business-profile"]).expect("d tag")])
+    .sign_with_keys(&second_member)
+    .expect("sign member action");
+    let denied = signed_request(
+        state,
+        &second_member,
+        &company_host,
+        "POST",
+        "/events",
+        Some(serde_json::to_string(&denied_action).expect("serialize member action")),
+        None,
+    )
+    .await;
+    assert_eq!(denied.status(), StatusCode::BAD_REQUEST);
+    assert!(response_json(denied).await["error"]
+        .as_str()
+        .is_some_and(|error| error.starts_with("restricted:")));
 }
 
 #[tokio::test]
