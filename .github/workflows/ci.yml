@@ -46,7 +46,7 @@ jobs:
         run: npm run build --prefix app
       - name: Install browser
         run: cd app && npx playwright install --with-deps chromium
-      - name: Exercise shipped shell and recovery
+      - name: Exercise shipped first run, shell and recovery
         run: npm run test:shell --prefix app
       - name: Upload failed browser traces
         if: failure()
