@@ -1,0 +1,80 @@
+part of '../compose_bar.dart';
+
+class _SendButton extends StatelessWidget {
+  final bool isSending;
+  final bool isDisabled;
+  final VoidCallback onTap;
+
+  const _SendButton({
+    required this.isSending,
+    required this.onTap,
+    this.isDisabled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: IconButton(
+        tooltip: 'Send message',
+        onPressed: (isSending || isDisabled)
+            ? null
+            : () => _runComposerAction(onTap),
+        style: IconButton.styleFrom(
+          backgroundColor: context.colors.primary,
+          disabledBackgroundColor: context.colors.primary.withValues(
+            alpha: 0.5,
+          ),
+          shape: const CircleBorder(),
+        ),
+        padding: EdgeInsets.zero,
+        icon: isSending
+            ? BuzzLoadingIndicator(
+                size: 18,
+                color: context.colors.onPrimary,
+                semanticLabel: 'Sending message',
+              )
+            : Icon(
+                LucideIcons.arrowUp,
+                size: 18,
+                color: context.colors.onPrimary,
+              ),
+      ),
+    );
+  }
+}
+
+class _VoiceNoteButton extends StatelessWidget {
+  final bool isDisabled;
+  final VoidCallback onTap;
+
+  const _VoiceNoteButton({required this.onTap, required this.isDisabled});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: IconButton(
+        tooltip: 'Record voice note',
+        onPressed: isDisabled ? null : () => _runComposerAction(onTap),
+        style: IconButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          disabledBackgroundColor: Colors.transparent,
+          shape: const CircleBorder(),
+        ),
+        padding: EdgeInsets.zero,
+        icon: Icon(
+          LucideIcons.mic,
+          size: 18,
+          color: conversationMutedColor(context),
+        ),
+      ),
+    );
+  }
+}
+
+String _formatUploadError(Object error) {
+  return error.toString().replaceFirst('Exception: ', '');
+}

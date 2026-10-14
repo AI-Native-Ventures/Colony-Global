@@ -1,0 +1,7272 @@
+{
+  "milestone": 2,
+  "base": "docs/colony-os",
+  "baseCommit": "262d489ebd05576530ab8e6c066fb070bf822d38",
+  "employeeIdentity": "Ants only. Owner direction overrides human portraits.",
+  "screens": [
+    {
+      "id": "G-01",
+      "name": "App window",
+      "slug": "app-window",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "first-open",
+          "label": "First open after first run"
+        },
+        {
+          "key": "reopening",
+          "label": "Reopening"
+        },
+        {
+          "key": "unreachable",
+          "label": "Colony unreachable"
+        },
+        {
+          "key": "paused-credits",
+          "label": "Paused: credits out"
+        },
+        {
+          "key": "paused-plan",
+          "label": "Paused: plan limit"
+        },
+        {
+          "key": "paused-person",
+          "label": "Paused by a person"
+        },
+        {
+          "key": "team-stopped",
+          "label": "Team stopped"
+        },
+        {
+          "key": "scout-stopped",
+          "label": "Scout stopped"
+        },
+        {
+          "key": "other-computer",
+          "label": "Team runs on another computer"
+        },
+        {
+          "key": "several-companies",
+          "label": "Several companies"
+        },
+        {
+          "key": "signed-out",
+          "label": "Signed out"
+        },
+        {
+          "key": "update-required",
+          "label": "Update required"
+        },
+        {
+          "key": "smallest",
+          "label": "Smallest window"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ]
+    },
+    {
+      "id": "G-07",
+      "name": "Employee identity",
+      "slug": "employee-identity",
+      "defaultState": "working",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "working",
+          "label": "Working"
+        },
+        {
+          "key": "starting",
+          "label": "Starting"
+        },
+        {
+          "key": "free",
+          "label": "Free"
+        },
+        {
+          "key": "waiting",
+          "label": "Waiting on you"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "stopped",
+          "label": "Stopped"
+        },
+        {
+          "key": "away",
+          "label": "Away"
+        },
+        {
+          "key": "hiring",
+          "label": "Hiring"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ]
+    },
+    {
+      "id": "O-01",
+      "name": "Welcome and sign in",
+      "slug": "welcome-and-sign-in",
+      "defaultState": "first-launch",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "first-launch",
+          "label": "First Launch"
+        },
+        {
+          "key": "returning",
+          "label": "Returning"
+        },
+        {
+          "key": "invite",
+          "label": "Invite"
+        },
+        {
+          "key": "waiting-google",
+          "label": "Waiting Google"
+        },
+        {
+          "key": "google-cancelled",
+          "label": "Google Cancelled"
+        },
+        {
+          "key": "email-wrong",
+          "label": "Email Wrong"
+        },
+        {
+          "key": "too-many-tries",
+          "label": "Too Many Tries"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "unreachable",
+          "label": "Unreachable"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "O-02",
+      "name": "Email code",
+      "slug": "email-code",
+      "defaultState": "waiting",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting"
+        },
+        {
+          "key": "checking",
+          "label": "Checking"
+        },
+        {
+          "key": "wrong",
+          "label": "Wrong"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "too-many",
+          "label": "Too Many"
+        },
+        {
+          "key": "no-email",
+          "label": "No Email"
+        },
+        {
+          "key": "cooling-down",
+          "label": "Cooling Down"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "unreachable",
+          "label": "Unreachable"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "O-03",
+      "name": "Your business",
+      "slug": "your-business",
+      "defaultState": "asking",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "asking",
+          "label": "Asking"
+        },
+        {
+          "key": "summary",
+          "label": "Summary"
+        },
+        {
+          "key": "bad-link",
+          "label": "Bad Link"
+        },
+        {
+          "key": "creating",
+          "label": "Creating"
+        },
+        {
+          "key": "company-failed",
+          "label": "Company Failed"
+        },
+        {
+          "key": "rate-limit",
+          "label": "Rate Limit"
+        },
+        {
+          "key": "company-limit",
+          "label": "Company Limit"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "O-04",
+      "name": "Power your team",
+      "slug": "power-your-team",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "credits-already",
+          "label": "Credits Already"
+        },
+        {
+          "key": "plan-already",
+          "label": "Plan Already"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "O-05",
+      "name": "Buy credits",
+      "slug": "buy-credits",
+      "defaultState": "choosing",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "choosing",
+          "label": "Choosing"
+        },
+        {
+          "key": "waiting-payment",
+          "label": "Waiting Payment"
+        },
+        {
+          "key": "paid",
+          "label": "Paid"
+        },
+        {
+          "key": "credits-coming",
+          "label": "Credits Coming"
+        },
+        {
+          "key": "credits-slow",
+          "label": "Credits Slow"
+        },
+        {
+          "key": "cancelled",
+          "label": "Cancelled"
+        },
+        {
+          "key": "not-finished",
+          "label": "Not Finished"
+        },
+        {
+          "key": "email-unconfirmed",
+          "label": "Email Unconfirmed"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "unreachable",
+          "label": "Unreachable"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "O-06",
+      "name": "Connect your plan",
+      "slug": "connect-your-plan",
+      "defaultState": "choice",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "choice",
+          "label": "Choice"
+        },
+        {
+          "key": "getting-ready",
+          "label": "Getting Ready"
+        },
+        {
+          "key": "slow",
+          "label": "Slow"
+        },
+        {
+          "key": "not-enough-space",
+          "label": "Not Enough Space"
+        },
+        {
+          "key": "setup-failed",
+          "label": "Setup Failed"
+        },
+        {
+          "key": "waiting-browser",
+          "label": "Waiting Browser"
+        },
+        {
+          "key": "sign-in-cancelled",
+          "label": "Sign In Cancelled"
+        },
+        {
+          "key": "free-plan",
+          "label": "Free Plan"
+        },
+        {
+          "key": "checking",
+          "label": "Checking"
+        },
+        {
+          "key": "check-failed",
+          "label": "Check Failed"
+        },
+        {
+          "key": "connected",
+          "label": "Connected"
+        },
+        {
+          "key": "already-set-up",
+          "label": "Already Set Up"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "O-07",
+      "name": "Scout gets to know you",
+      "slug": "scout-gets-to-know-you",
+      "defaultState": "reading",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "reading",
+          "label": "Reading"
+        },
+        {
+          "key": "reading-slow",
+          "label": "Reading Slow"
+        },
+        {
+          "key": "getting-ready",
+          "label": "Getting Ready"
+        },
+        {
+          "key": "link-failed",
+          "label": "Link Failed"
+        },
+        {
+          "key": "no-links",
+          "label": "No Links"
+        },
+        {
+          "key": "profile-ready",
+          "label": "Profile Ready"
+        },
+        {
+          "key": "scout-failed",
+          "label": "Scout Failed"
+        },
+        {
+          "key": "credits-out",
+          "label": "Credits Out"
+        },
+        {
+          "key": "plan-limit",
+          "label": "Plan Limit"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "O-08",
+      "name": "Meet your team",
+      "slug": "meet-your-team",
+      "defaultState": "proposal-ready",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "proposal-ready",
+          "label": "Proposal Ready"
+        },
+        {
+          "key": "putting-together",
+          "label": "Putting Together"
+        },
+        {
+          "key": "some-unticked",
+          "label": "Some Unticked"
+        },
+        {
+          "key": "only-scout",
+          "label": "Only Scout"
+        },
+        {
+          "key": "name-not-allowed",
+          "label": "Name Not Allowed"
+        },
+        {
+          "key": "low-credits",
+          "label": "Low Credits"
+        },
+        {
+          "key": "hiring",
+          "label": "Hiring"
+        },
+        {
+          "key": "one-hire-failed",
+          "label": "One Hire Failed"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "O-09",
+      "name": "Keep your team running",
+      "slug": "keep-your-team-running",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "notifications-allowed",
+          "label": "Notifications Allowed"
+        },
+        {
+          "key": "notifications-refused",
+          "label": "Notifications Refused"
+        },
+        {
+          "key": "computer-message",
+          "label": "Computer Message"
+        },
+        {
+          "key": "desktop-computer",
+          "label": "Desktop Computer"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "O-10",
+      "name": "Team starting",
+      "slug": "team-starting",
+      "defaultState": "starting",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "starting",
+          "label": "Starting"
+        },
+        {
+          "key": "slow",
+          "label": "Slow"
+        },
+        {
+          "key": "one-failed",
+          "label": "One Failed"
+        },
+        {
+          "key": "scout-failed",
+          "label": "Scout Failed"
+        },
+        {
+          "key": "credits-out",
+          "label": "Credits Out"
+        },
+        {
+          "key": "plan-limit",
+          "label": "Plan Limit"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "ready",
+          "label": "Ready"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "P-01",
+      "name": "Join a company",
+      "slug": "join-a-company",
+      "defaultState": "valid",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "valid",
+          "label": "Valid"
+        },
+        {
+          "key": "wrong-email",
+          "label": "Wrong Email"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "cancelled",
+          "label": "Cancelled"
+        },
+        {
+          "key": "already-member",
+          "label": "Already Member"
+        },
+        {
+          "key": "closed",
+          "label": "Closed"
+        },
+        {
+          "key": "failed",
+          "label": "Failed"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "P-01a",
+      "name": "Stay in the loop",
+      "slug": "stay-in-the-loop",
+      "defaultState": "allowed",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "allowed",
+          "label": "Allowed"
+        },
+        {
+          "key": "refused",
+          "label": "Refused"
+        },
+        {
+          "key": "team-not-running",
+          "label": "Team Not Running"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "N-01",
+      "name": "Welcome back",
+      "slug": "welcome-back",
+      "defaultState": "online",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "online",
+          "label": "Online"
+        },
+        {
+          "key": "off",
+          "label": "Off"
+        },
+        {
+          "key": "never-started",
+          "label": "Never Started"
+        },
+        {
+          "key": "several-companies",
+          "label": "Several Companies"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "N-02",
+      "name": "Moving your team",
+      "slug": "moving-your-team",
+      "defaultState": "confirming",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "confirming",
+          "label": "Confirming"
+        },
+        {
+          "key": "old-online",
+          "label": "Old Online"
+        },
+        {
+          "key": "old-off",
+          "label": "Old Off"
+        },
+        {
+          "key": "moving",
+          "label": "Moving"
+        },
+        {
+          "key": "one-failed",
+          "label": "One Failed"
+        },
+        {
+          "key": "move-failed",
+          "label": "Move Failed"
+        },
+        {
+          "key": "power-needed",
+          "label": "Power Needed"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "done",
+          "label": "Done"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "First run"
+    },
+    {
+      "id": "T-01",
+      "name": "Today",
+      "slug": "today",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal morning"
+        },
+        {
+          "key": "first-day",
+          "label": "First day, before plans arrive"
+        },
+        {
+          "key": "before-brief",
+          "label": "Before today's brief"
+        },
+        {
+          "key": "friday",
+          "label": "Friday wrap"
+        },
+        {
+          "key": "weekend",
+          "label": "Weekend"
+        },
+        {
+          "key": "empty",
+          "label": "Nothing needs you"
+        },
+        {
+          "key": "many",
+          "label": "Many decisions"
+        },
+        {
+          "key": "away",
+          "label": "While you were away"
+        },
+        {
+          "key": "paused-credits",
+          "label": "Team paused: credits out"
+        },
+        {
+          "key": "paused-plan",
+          "label": "Team paused: own plan limit"
+        },
+        {
+          "key": "paused-person",
+          "label": "Team paused by a person"
+        },
+        {
+          "key": "scout-stopped",
+          "label": "Scout stopped"
+        },
+        {
+          "key": "team-stopped",
+          "label": "Team stopped"
+        },
+        {
+          "key": "computer-off",
+          "label": "Team computer off"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        }
+      ]
+    },
+    {
+      "id": "T-02",
+      "name": "Conversation list",
+      "slug": "conversations",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Conversations",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Open conversations"
+        },
+        {
+          "key": "archive-activity",
+          "label": "Activity in an archived conversation"
+        },
+        {
+          "key": "archived",
+          "label": "Archived list"
+        },
+        {
+          "key": "archived-empty",
+          "label": "Nothing archived"
+        },
+        {
+          "key": "empty",
+          "label": "Everything archived"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Taking longer"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        }
+      ]
+    },
+    {
+      "id": "T-03",
+      "name": "Conversation",
+      "slug": "conversation",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "new",
+          "label": "New conversation"
+        },
+        {
+          "key": "long-history",
+          "label": "Loading and long history"
+        },
+        {
+          "key": "working",
+          "label": "Someone working"
+        },
+        {
+          "key": "sending",
+          "label": "Message sending"
+        },
+        {
+          "key": "sent",
+          "label": "Message sent"
+        },
+        {
+          "key": "not-sent",
+          "label": "Message not sent"
+        },
+        {
+          "key": "paused-credits",
+          "label": "Team paused: credits out"
+        },
+        {
+          "key": "paused-plan",
+          "label": "Team paused: own plan limit"
+        },
+        {
+          "key": "paused-person",
+          "label": "Team paused by a person"
+        },
+        {
+          "key": "scout-stopped",
+          "label": "Scout stopped"
+        },
+        {
+          "key": "team-stopped",
+          "label": "Team stopped"
+        },
+        {
+          "key": "computer-off",
+          "label": "Team computer off"
+        },
+        {
+          "key": "employee-stuck",
+          "label": "An employee is stuck"
+        },
+        {
+          "key": "archived",
+          "label": "Archived"
+        },
+        {
+          "key": "writing",
+          "label": "Scout is writing"
+        },
+        {
+          "key": "mention",
+          "label": "Name someone with @"
+        },
+        {
+          "key": "reply",
+          "label": "Reply to a message"
+        },
+        {
+          "key": "thread",
+          "label": "Message thread"
+        },
+        {
+          "key": "card-thread",
+          "label": "Card discussion thread"
+        },
+        {
+          "key": "workspace",
+          "label": "Conversation workspace"
+        },
+        {
+          "key": "edited",
+          "label": "Edited message"
+        },
+        {
+          "key": "deleted",
+          "label": "Deleted message"
+        },
+        {
+          "key": "waiting-send",
+          "label": "Waiting to send"
+        },
+        {
+          "key": "routing",
+          "label": "Move to Spring launch"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "unread",
+          "label": "First unread message"
+        },
+        {
+          "key": "search-result",
+          "label": "Search result highlighted"
+        }
+      ]
+    },
+    {
+      "id": "T-04",
+      "name": "New conversation",
+      "slug": "new-conversation",
+      "defaultState": "empty",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Conversations",
+      "states": [
+        {
+          "key": "empty",
+          "label": "Starting points"
+        },
+        {
+          "key": "first-sent",
+          "label": "First message sent"
+        },
+        {
+          "key": "routing",
+          "label": "Offer to move to a topic"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Taking longer"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        }
+      ]
+    },
+    {
+      "id": "T-05",
+      "name": "Needs you",
+      "slug": "needs-you",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Open items"
+        },
+        {
+          "key": "empty",
+          "label": "Nothing needs you"
+        },
+        {
+          "key": "many",
+          "label": "Many items"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        },
+        {
+          "key": "history",
+          "label": "History"
+        },
+        {
+          "key": "history-empty",
+          "label": "Empty history"
+        },
+        {
+          "key": "urgent",
+          "label": "Urgent filter"
+        },
+        {
+          "key": "to-post",
+          "label": "To post or send filter"
+        },
+        {
+          "key": "plans",
+          "label": "Plans filter"
+        },
+        {
+          "key": "money",
+          "label": "Money and hiring filter"
+        },
+        {
+          "key": "employee",
+          "label": "From one employee"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        }
+      ]
+    },
+    {
+      "id": "T-06",
+      "name": "Search",
+      "slug": "search",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Conversations",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Recent searches and conversations"
+        },
+        {
+          "key": "results",
+          "label": "Search results"
+        },
+        {
+          "key": "filtered",
+          "label": "Narrow by person and topic"
+        },
+        {
+          "key": "archived",
+          "label": "Archived results"
+        },
+        {
+          "key": "voice",
+          "label": "Voice note transcript"
+        },
+        {
+          "key": "no-results",
+          "label": "Nothing found"
+        },
+        {
+          "key": "empty",
+          "label": "No recent searches"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Taking longer"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        }
+      ]
+    },
+    {
+      "id": "T-07",
+      "name": "Voice note",
+      "slug": "voice-note",
+      "defaultState": "review",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Conversations",
+      "states": [
+        {
+          "key": "idle",
+          "label": "Ready to record"
+        },
+        {
+          "key": "first-use",
+          "label": "First microphone use"
+        },
+        {
+          "key": "permission-denied",
+          "label": "Microphone refused"
+        },
+        {
+          "key": "no-microphone",
+          "label": "No microphone"
+        },
+        {
+          "key": "recording",
+          "label": "Recording"
+        },
+        {
+          "key": "locked",
+          "label": "Hands-free recording"
+        },
+        {
+          "key": "review",
+          "label": "Review before sending"
+        },
+        {
+          "key": "near-limit",
+          "label": "4 minutes 30 seconds"
+        },
+        {
+          "key": "at-limit",
+          "label": "5 minute limit"
+        },
+        {
+          "key": "too-short",
+          "label": "Under one second"
+        },
+        {
+          "key": "sent",
+          "label": "Sent voice note"
+        },
+        {
+          "key": "transcribing",
+          "label": "Writing it down"
+        },
+        {
+          "key": "transcript-ready",
+          "label": "Transcript ready"
+        },
+        {
+          "key": "transcription-failed",
+          "label": "Could not transcribe"
+        },
+        {
+          "key": "transcript-fixed",
+          "label": "Sender fixed transcript"
+        },
+        {
+          "key": "long-transcript",
+          "label": "Full transcript"
+        },
+        {
+          "key": "preparing",
+          "label": "First voice note on this computer"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Taking longer"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        }
+      ]
+    },
+    {
+      "id": "T-08",
+      "name": "Attachments",
+      "slug": "attachments",
+      "defaultState": "before-send",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Conversations",
+      "states": [
+        {
+          "key": "before-send",
+          "label": "Files ready to send"
+        },
+        {
+          "key": "empty",
+          "label": "No files yet"
+        },
+        {
+          "key": "uploading",
+          "label": "Upload progress"
+        },
+        {
+          "key": "upload-failed",
+          "label": "Upload failed"
+        },
+        {
+          "key": "too-big",
+          "label": "File too big"
+        },
+        {
+          "key": "not-allowed",
+          "label": "File type not allowed"
+        },
+        {
+          "key": "too-many",
+          "label": "More than ten files"
+        },
+        {
+          "key": "rate-limited",
+          "label": "A large batch takes a minute"
+        },
+        {
+          "key": "sent",
+          "label": "Files in a message"
+        },
+        {
+          "key": "photo-viewer",
+          "label": "Photo viewer"
+        },
+        {
+          "key": "document-viewer",
+          "label": "Document viewer"
+        },
+        {
+          "key": "library-offer",
+          "label": "Photo library offer"
+        },
+        {
+          "key": "library-added",
+          "label": "Photos added to library"
+        },
+        {
+          "key": "customer-screenshot",
+          "label": "Customer message screenshot"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Taking longer"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        }
+      ]
+    },
+    {
+      "id": "C-00",
+      "name": "Card basics",
+      "slug": "card-basics",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "ready",
+          "label": "Ready to post"
+        },
+        {
+          "key": "ready-send",
+          "label": "Ready to send"
+        },
+        {
+          "key": "posted",
+          "label": "Posted"
+        },
+        {
+          "key": "sent",
+          "label": "Sent"
+        },
+        {
+          "key": "live",
+          "label": "Live"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "answered",
+          "label": "Answered"
+        },
+        {
+          "key": "hired",
+          "label": "Hired"
+        },
+        {
+          "key": "paid",
+          "label": "Paid"
+        },
+        {
+          "key": "fixed",
+          "label": "Fixed"
+        },
+        {
+          "key": "chosen",
+          "label": "Chosen"
+        },
+        {
+          "key": "owner-only",
+          "label": "Owner-only card seen by a partner"
+        },
+        {
+          "key": "note",
+          "label": "Ask for changes note"
+        },
+        {
+          "key": "versions",
+          "label": "Earlier versions"
+        },
+        {
+          "key": "history",
+          "label": "History"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        },
+        {
+          "key": "image-failed",
+          "label": "Image did not load"
+        }
+      ]
+    },
+    {
+      "id": "C-01",
+      "name": "Decision",
+      "slug": "decision",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "note",
+          "label": "Ask for changes note"
+        },
+        {
+          "key": "decline-note",
+          "label": "Optional decline reason"
+        },
+        {
+          "key": "ask-scout",
+          "label": "Ask Scout"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-02",
+      "name": "Question",
+      "slug": "question",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "answered",
+          "label": "Answered"
+        },
+        {
+          "key": "skipped",
+          "label": "Skipped"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "options",
+          "label": "Pick an option"
+        },
+        {
+          "key": "multiple",
+          "label": "Pick several options"
+        },
+        {
+          "key": "files",
+          "label": "Add files as the answer"
+        },
+        {
+          "key": "you-decide",
+          "label": "You decide"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-03",
+      "name": "Plan",
+      "slug": "plan",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "approved",
+          "label": "Approved, active"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "ended",
+          "label": "Ended"
+        },
+        {
+          "key": "above-budget",
+          "label": "Above weekly budget"
+        },
+        {
+          "key": "not-enough-credits",
+          "label": "Not enough credits"
+        },
+        {
+          "key": "employee-plan",
+          "label": "Employee plan"
+        },
+        {
+          "key": "partly-approved",
+          "label": "One employee plan approved"
+        },
+        {
+          "key": "note",
+          "label": "Ask for changes on one"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-04",
+      "name": "Social post",
+      "slug": "social-post",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "ready",
+          "label": "Ready to post"
+        },
+        {
+          "key": "posted",
+          "label": "Posted"
+        },
+        {
+          "key": "skipped",
+          "label": "Skipped"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "time-to-post",
+          "label": "Time to post"
+        },
+        {
+          "key": "late",
+          "label": "Late, 3 hours"
+        },
+        {
+          "key": "missed",
+          "label": "Missed, 24 hours"
+        },
+        {
+          "key": "batch",
+          "label": "Week batch"
+        },
+        {
+          "key": "batch-mixed",
+          "label": "Batch, mixed statuses"
+        },
+        {
+          "key": "note",
+          "label": "Ask for changes"
+        },
+        {
+          "key": "change-time",
+          "label": "Change time"
+        },
+        {
+          "key": "post-link",
+          "label": "Optional post link"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        },
+        {
+          "key": "image-failed",
+          "label": "Image did not load"
+        }
+      ]
+    },
+    {
+      "id": "C-05",
+      "name": "Carousel",
+      "slug": "carousel",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "ready",
+          "label": "Ready to post"
+        },
+        {
+          "key": "posted",
+          "label": "Posted"
+        },
+        {
+          "key": "skipped",
+          "label": "Skipped"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "time-to-post",
+          "label": "Time to post"
+        },
+        {
+          "key": "late",
+          "label": "Late, 3 hours"
+        },
+        {
+          "key": "missed",
+          "label": "Missed, 24 hours"
+        },
+        {
+          "key": "batch",
+          "label": "Week batch"
+        },
+        {
+          "key": "batch-mixed",
+          "label": "Batch, mixed statuses"
+        },
+        {
+          "key": "note",
+          "label": "Ask for changes on a slide"
+        },
+        {
+          "key": "change-time",
+          "label": "Change time"
+        },
+        {
+          "key": "post-link",
+          "label": "Optional post link"
+        },
+        {
+          "key": "slide-3",
+          "label": "Slide 3"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        },
+        {
+          "key": "image-failed",
+          "label": "Image did not load"
+        }
+      ]
+    },
+    {
+      "id": "C-06",
+      "name": "Video script",
+      "slug": "video-script",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "to-film",
+          "label": "To film"
+        },
+        {
+          "key": "to-post",
+          "label": "To post"
+        },
+        {
+          "key": "posted",
+          "label": "Posted"
+        },
+        {
+          "key": "skipped",
+          "label": "Skipped"
+        },
+        {
+          "key": "missed",
+          "label": "Missed"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "shot-progress",
+          "label": "Shots in progress"
+        },
+        {
+          "key": "post-link",
+          "label": "Optional post link"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-07",
+      "name": "Image set",
+      "slug": "image-set",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "chosen",
+          "label": "Chosen"
+        },
+        {
+          "key": "more-asked",
+          "label": "More asked"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "credits-out",
+          "label": "Out of credits"
+        },
+        {
+          "key": "image-failed",
+          "label": "Image did not load"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-08",
+      "name": "Message draft",
+      "slug": "message-draft",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "ready-send",
+          "label": "Ready to send"
+        },
+        {
+          "key": "sent",
+          "label": "Sent"
+        },
+        {
+          "key": "replied",
+          "label": "Replied"
+        },
+        {
+          "key": "skipped",
+          "label": "Skipped"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "batch",
+          "label": "Message batch"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-09",
+      "name": "Customer reply",
+      "slug": "customer-reply",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "ready-send",
+          "label": "Ready to send"
+        },
+        {
+          "key": "sent",
+          "label": "Sent"
+        },
+        {
+          "key": "customer-replied",
+          "label": "Customer replied"
+        },
+        {
+          "key": "skipped",
+          "label": "Skipped"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "urgent",
+          "label": "Waiting over 24 hours"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-10",
+      "name": "Website change",
+      "slug": "website-change",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "scheduled",
+          "label": "Scheduled"
+        },
+        {
+          "key": "going-live",
+          "label": "Going live"
+        },
+        {
+          "key": "live",
+          "label": "Live"
+        },
+        {
+          "key": "failed-live",
+          "label": "Did not go live"
+        },
+        {
+          "key": "undone",
+          "label": "Undone"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "hosting-paused",
+          "label": "Hosting paused"
+        },
+        {
+          "key": "no-domain",
+          "label": "No own domain"
+        },
+        {
+          "key": "undo-confirm",
+          "label": "Undo confirmation"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-11",
+      "name": "Lead list",
+      "slug": "lead-list",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "selection",
+          "label": "Lead selection"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-12",
+      "name": "Document",
+      "slug": "document",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-13",
+      "name": "Invoice or quote",
+      "slug": "invoice-or-quote",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "ready-send",
+          "label": "Ready to send"
+        },
+        {
+          "key": "sent",
+          "label": "Sent"
+        },
+        {
+          "key": "paid",
+          "label": "Paid"
+        },
+        {
+          "key": "overdue",
+          "label": "Overdue"
+        },
+        {
+          "key": "cancelled",
+          "label": "Cancelled"
+        },
+        {
+          "key": "accepted",
+          "label": "Accepted"
+        },
+        {
+          "key": "not-accepted",
+          "label": "Not accepted"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "quote",
+          "label": "Quote variant"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-14",
+      "name": "Brand kit",
+      "slug": "brand-kit",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "replaced",
+          "label": "Replaced"
+        },
+        {
+          "key": "missing-logo",
+          "label": "Add a logo"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-15",
+      "name": "Hire proposal",
+      "slug": "hire-proposal",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "hired",
+          "label": "Hired"
+        },
+        {
+          "key": "not-now",
+          "label": "Not now"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "change-name",
+          "label": "Change name"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-16",
+      "name": "Money request",
+      "slug": "money-request",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "paid",
+          "label": "Paid"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "changes",
+          "label": "Changes asked"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "withdrawn",
+          "label": "Withdrawn"
+        },
+        {
+          "key": "owner-only",
+          "label": "Owner-only billing"
+        },
+        {
+          "key": "credits-out",
+          "label": "Buy credits"
+        },
+        {
+          "key": "hosting",
+          "label": "Fix hosting payment"
+        },
+        {
+          "key": "ad-spend",
+          "label": "Ad spend"
+        },
+        {
+          "key": "change-amount",
+          "label": "Change amount"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-17",
+      "name": "Numbers check-in",
+      "slug": "numbers-check-in",
+      "defaultState": "waiting",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "waiting",
+          "label": "Waiting for you"
+        },
+        {
+          "key": "sent",
+          "label": "Sent"
+        },
+        {
+          "key": "skipped",
+          "label": "Skipped"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "invalid-number",
+          "label": "Invalid number"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-18",
+      "name": "Problem",
+      "slug": "problem-card",
+      "defaultState": "open",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "open",
+          "label": "Open"
+        },
+        {
+          "key": "restarting",
+          "label": "Restarting"
+        },
+        {
+          "key": "fixed",
+          "label": "Fixed"
+        },
+        {
+          "key": "still-failing",
+          "label": "Still failing"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "computer-off",
+          "label": "Team computer off"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-19",
+      "name": "Brief and Friday wrap",
+      "slug": "brief-and-friday-wrap",
+      "defaultState": "new",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "new",
+          "label": "New"
+        },
+        {
+          "key": "read",
+          "label": "Read"
+        },
+        {
+          "key": "late",
+          "label": "Late brief"
+        },
+        {
+          "key": "friday",
+          "label": "Friday wrap"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "C-20",
+      "name": "Done note",
+      "slug": "done-note",
+      "defaultState": "shown",
+      "forms": [
+        "full",
+        "inline"
+      ],
+      "states": [
+        {
+          "key": "shown",
+          "label": "Shown"
+        },
+        {
+          "key": "grouped",
+          "label": "Grouped updates"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "two-people",
+          "label": "Two people deciding at once"
+        }
+      ]
+    },
+    {
+      "id": "M-01",
+      "name": "Team",
+      "slug": "team",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "first-day",
+          "label": "First day"
+        },
+        {
+          "key": "waiting",
+          "label": "Some waiting on you"
+        },
+        {
+          "key": "paused-credits",
+          "label": "Team paused for credits"
+        },
+        {
+          "key": "paused-person",
+          "label": "Team paused by a person"
+        },
+        {
+          "key": "team-stopped",
+          "label": "Team stopped"
+        },
+        {
+          "key": "stopped-elsewhere",
+          "label": "Team stopped on another computer"
+        },
+        {
+          "key": "other-computer",
+          "label": "Team on another computer"
+        },
+        {
+          "key": "only-scout",
+          "label": "Only Scout left"
+        },
+        {
+          "key": "former",
+          "label": "Former team members"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Team"
+    },
+    {
+      "id": "M-02",
+      "name": "Employee page",
+      "slug": "employee-page",
+      "defaultState": "working",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "working",
+          "label": "Working"
+        },
+        {
+          "key": "starting",
+          "label": "Starting"
+        },
+        {
+          "key": "first-week",
+          "label": "First week, before first plan"
+        },
+        {
+          "key": "free",
+          "label": "Free"
+        },
+        {
+          "key": "away",
+          "label": "Away"
+        },
+        {
+          "key": "waiting",
+          "label": "Waiting on you"
+        },
+        {
+          "key": "paused-person",
+          "label": "Paused by a person"
+        },
+        {
+          "key": "paused-credits",
+          "label": "Paused for credits"
+        },
+        {
+          "key": "paused-plan",
+          "label": "Paused for plan limit"
+        },
+        {
+          "key": "paused-budget",
+          "label": "Paused at weekly budget"
+        },
+        {
+          "key": "stopped",
+          "label": "Stopped"
+        },
+        {
+          "key": "failing",
+          "label": "Failing"
+        },
+        {
+          "key": "let-go",
+          "label": "Let go"
+        },
+        {
+          "key": "other-computer",
+          "label": "Team on another computer"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Team"
+    },
+    {
+      "id": "D-03",
+      "name": "Naledi's desk",
+      "slug": "naledi-desk",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "first-week",
+          "label": "First week"
+        },
+        {
+          "key": "brand-waiting",
+          "label": "Brand kit waiting on you"
+        },
+        {
+          "key": "batch-waiting",
+          "label": "Batch waiting on you"
+        },
+        {
+          "key": "missed",
+          "label": "Missed post"
+        },
+        {
+          "key": "no-accounts",
+          "label": "No account names yet"
+        },
+        {
+          "key": "paused",
+          "label": "Naledi paused"
+        },
+        {
+          "key": "month",
+          "label": "Month calendar"
+        },
+        {
+          "key": "instagram",
+          "label": "Instagram filter"
+        },
+        {
+          "key": "tiktok",
+          "label": "TikTok filter"
+        },
+        {
+          "key": "facebook",
+          "label": "Facebook filter"
+        },
+        {
+          "key": "posted",
+          "label": "Marked as posted"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Employee desks"
+    },
+    {
+      "id": "M-03",
+      "name": "Employee plan",
+      "slug": "employee-plan",
+      "defaultState": "approved",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "first-week",
+          "label": "First week"
+        },
+        {
+          "key": "waiting",
+          "label": "Waiting"
+        },
+        {
+          "key": "behind",
+          "label": "Behind"
+        },
+        {
+          "key": "changes",
+          "label": "Changes"
+        },
+        {
+          "key": "ended",
+          "label": "Ended"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "previous",
+          "label": "Previous"
+        },
+        {
+          "key": "let-go",
+          "label": "Let go"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Team"
+    },
+    {
+      "id": "M-04",
+      "name": "Employee schedule",
+      "slug": "employee-schedule",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "routine-off",
+          "label": "Routine off"
+        },
+        {
+          "key": "running",
+          "label": "Running"
+        },
+        {
+          "key": "missed",
+          "label": "Missed"
+        },
+        {
+          "key": "didnt-finish",
+          "label": "Didnt finish"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "let-go",
+          "label": "Let go"
+        },
+        {
+          "key": "confirm-off",
+          "label": "Confirm off"
+        },
+        {
+          "key": "change-time",
+          "label": "Change time"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Team"
+    },
+    {
+      "id": "M-05",
+      "name": "Employee activity",
+      "slug": "employee-activity",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "filtered-empty",
+          "label": "Filtered empty"
+        },
+        {
+          "key": "older",
+          "label": "Older"
+        },
+        {
+          "key": "let-go",
+          "label": "Let go"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Team"
+    },
+    {
+      "id": "M-06",
+      "name": "Employee settings",
+      "slug": "employee-settings",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "scout",
+          "label": "Scout"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "paused-budget",
+          "label": "Paused budget"
+        },
+        {
+          "key": "saving",
+          "label": "Saving"
+        },
+        {
+          "key": "save-failed",
+          "label": "Save failed"
+        },
+        {
+          "key": "computer-off",
+          "label": "Computer off"
+        },
+        {
+          "key": "confirm-pause",
+          "label": "Confirm pause"
+        },
+        {
+          "key": "confirm-let-go",
+          "label": "Confirm let go"
+        },
+        {
+          "key": "let-go",
+          "label": "Let go"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Team"
+    },
+    {
+      "id": "M-07",
+      "name": "Direct chat",
+      "slug": "direct-chat",
+      "defaultState": "working",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "first-time",
+          "label": "First time"
+        },
+        {
+          "key": "working",
+          "label": "Working"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "stopped",
+          "label": "Stopped"
+        },
+        {
+          "key": "failing",
+          "label": "Failing"
+        },
+        {
+          "key": "paused-person",
+          "label": "Paused person"
+        },
+        {
+          "key": "paused-credits",
+          "label": "Paused credits"
+        },
+        {
+          "key": "let-go",
+          "label": "Let go"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Team"
+    },
+    {
+      "id": "M-08",
+      "name": "New hire starting",
+      "slug": "new-hire-starting",
+      "defaultState": "starting",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "starting",
+          "label": "Starting"
+        },
+        {
+          "key": "done",
+          "label": "Done"
+        },
+        {
+          "key": "failed",
+          "label": "Failed"
+        },
+        {
+          "key": "other-computer",
+          "label": "Other computer"
+        },
+        {
+          "key": "computer-off",
+          "label": "Computer off"
+        },
+        {
+          "key": "paused-credits",
+          "label": "Paused credits"
+        },
+        {
+          "key": "cancel-confirm",
+          "label": "Cancel confirm"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Team"
+    },
+    {
+      "id": "D-01",
+      "name": "Scout's desk",
+      "slug": "scout-desk",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "first-day",
+          "label": "First day"
+        },
+        {
+          "key": "plan-waiting",
+          "label": "Company plan waiting on you"
+        },
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "stopped",
+          "label": "Scout stopped"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-02",
+      "name": "Maya's desk",
+      "slug": "maya-desk",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "first-week",
+          "label": "First week"
+        },
+        {
+          "key": "no-website",
+          "label": "No Colony website"
+        },
+        {
+          "key": "shopify",
+          "label": "Existing Shopify or Wix site"
+        },
+        {
+          "key": "no-numbers",
+          "label": "No numbers this week"
+        },
+        {
+          "key": "behind",
+          "label": "Campaign behind"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-02a",
+      "name": "Campaign detail",
+      "slug": "campaign-detail",
+      "defaultState": "running",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "planned",
+          "label": "Planned"
+        },
+        {
+          "key": "running",
+          "label": "Running"
+        },
+        {
+          "key": "behind",
+          "label": "Behind"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "done",
+          "label": "Done"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-03a",
+      "name": "Photo library",
+      "slug": "photo-library",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "uploading",
+          "label": "Uploading"
+        },
+        {
+          "key": "file-rejected",
+          "label": "File not accepted"
+        },
+        {
+          "key": "filtered-empty",
+          "label": "No matching photos"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-04",
+      "name": "Sipho's desk",
+      "slug": "sipho-desk",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "first-week",
+          "label": "First week"
+        },
+        {
+          "key": "no-leads",
+          "label": "No leads yet"
+        },
+        {
+          "key": "nothing-due",
+          "label": "Nothing due today"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-04a",
+      "name": "Lead detail",
+      "slug": "lead-detail",
+      "defaultState": "contacted",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "new",
+          "label": "New"
+        },
+        {
+          "key": "contacted",
+          "label": "Contacted"
+        },
+        {
+          "key": "talking",
+          "label": "Talking"
+        },
+        {
+          "key": "won",
+          "label": "Won"
+        },
+        {
+          "key": "lost",
+          "label": "Lost"
+        },
+        {
+          "key": "no-contact",
+          "label": "No contact found"
+        },
+        {
+          "key": "unreadable",
+          "label": "Screenshot unreadable"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-05",
+      "name": "Leo's desk",
+      "slug": "leo-desk",
+      "defaultState": "live",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "live",
+          "label": "Live"
+        },
+        {
+          "key": "no-site",
+          "label": "No Colony site"
+        },
+        {
+          "key": "first-week",
+          "label": "First week"
+        },
+        {
+          "key": "first-ready",
+          "label": "First site ready"
+        },
+        {
+          "key": "going-live",
+          "label": "Going live"
+        },
+        {
+          "key": "publish-failed",
+          "label": "Didn't go live"
+        },
+        {
+          "key": "domain-connecting",
+          "label": "Domain connecting"
+        },
+        {
+          "key": "payment-problem",
+          "label": "Hosting payment problem"
+        },
+        {
+          "key": "hosting-paused",
+          "label": "Hosting paused"
+        },
+        {
+          "key": "shopify",
+          "label": "Existing Shopify or Wix site"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-05a",
+      "name": "Connect your domain",
+      "slug": "connect-domain",
+      "defaultState": "entering",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "entering",
+          "label": "Entering"
+        },
+        {
+          "key": "waiting",
+          "label": "Waiting for the lines"
+        },
+        {
+          "key": "securing",
+          "label": "Found and securing"
+        },
+        {
+          "key": "connected",
+          "label": "Connected"
+        },
+        {
+          "key": "domain-problem",
+          "label": "Line points somewhere else"
+        },
+        {
+          "key": "removing",
+          "label": "Removing"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-06",
+      "name": "Grace's desk",
+      "slug": "grace-desk",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "first-week",
+          "label": "First week"
+        },
+        {
+          "key": "forwarding",
+          "label": "Forwarding not set up"
+        },
+        {
+          "key": "no-customers",
+          "label": "No customer messages"
+        },
+        {
+          "key": "overdue",
+          "label": "Customer waiting over 24 hours"
+        },
+        {
+          "key": "decision-needed",
+          "label": "Decision needed"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-06a",
+      "name": "Customer thread",
+      "slug": "customer-thread",
+      "defaultState": "to-reply",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "to-reply",
+          "label": "To reply"
+        },
+        {
+          "key": "waiting-customer",
+          "label": "Waiting on the customer"
+        },
+        {
+          "key": "done",
+          "label": "Done"
+        },
+        {
+          "key": "needs-decision",
+          "label": "Needs a decision"
+        },
+        {
+          "key": "unreadable",
+          "label": "Screenshot unreadable"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-06b",
+      "name": "Knowledge",
+      "slug": "knowledge",
+      "defaultState": "approved",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "first-week",
+          "label": "First week"
+        },
+        {
+          "key": "website-old",
+          "label": "Website shows the old version"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "D-06c",
+      "name": "Paste a customer message",
+      "slug": "paste-customer",
+      "defaultState": "empty",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Employee desks",
+      "states": [
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "reading",
+          "label": "Reading a screenshot"
+        },
+        {
+          "key": "unreadable",
+          "label": "Screenshot unreadable"
+        },
+        {
+          "key": "matched",
+          "label": "Matched customer"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading over 10 seconds"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner view"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "let-go",
+          "label": "Former employee"
+        }
+      ]
+    },
+    {
+      "id": "S-01",
+      "name": "Business profile",
+      "slug": "business-profile",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "missing-facts",
+          "label": "Missing Facts"
+        },
+        {
+          "key": "saving",
+          "label": "Saving"
+        },
+        {
+          "key": "saved",
+          "label": "Saved"
+        },
+        {
+          "key": "save-failed",
+          "label": "Save Failed"
+        },
+        {
+          "key": "changed-by-someone",
+          "label": "Changed By Someone"
+        },
+        {
+          "key": "follow-up",
+          "label": "Follow Up"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Settings"
+    },
+    {
+      "id": "S-02",
+      "name": "Credits and billing",
+      "slug": "credits-and-billing",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "low",
+          "label": "Low"
+        },
+        {
+          "key": "out",
+          "label": "Out"
+        },
+        {
+          "key": "waiting-payment",
+          "label": "Waiting Payment"
+        },
+        {
+          "key": "paid",
+          "label": "Paid"
+        },
+        {
+          "key": "payment-failed",
+          "label": "Payment Failed"
+        },
+        {
+          "key": "auto-top-up-ran",
+          "label": "Auto Top Up Ran"
+        },
+        {
+          "key": "auto-top-up-failed",
+          "label": "Auto Top Up Failed"
+        },
+        {
+          "key": "monthly-limit",
+          "label": "Monthly Limit"
+        },
+        {
+          "key": "hosting-problem",
+          "label": "Hosting Problem"
+        },
+        {
+          "key": "own-plan",
+          "label": "Own Plan"
+        },
+        {
+          "key": "no-payments",
+          "label": "No Payments"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Settings"
+    },
+    {
+      "id": "S-03",
+      "name": "How your team is powered",
+      "slug": "how-your-team-is-powered",
+      "defaultState": "credits",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "credits",
+          "label": "Credits"
+        },
+        {
+          "key": "claude",
+          "label": "Claude"
+        },
+        {
+          "key": "chatgpt",
+          "label": "Chatgpt"
+        },
+        {
+          "key": "setting-up",
+          "label": "Setting Up"
+        },
+        {
+          "key": "setup-failed",
+          "label": "Setup Failed"
+        },
+        {
+          "key": "limit",
+          "label": "Limit"
+        },
+        {
+          "key": "signed-out",
+          "label": "Signed Out"
+        },
+        {
+          "key": "other-computer",
+          "label": "Other Computer"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Settings"
+    },
+    {
+      "id": "S-04",
+      "name": "Connections",
+      "slug": "connections",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "forwarding-not-set",
+          "label": "Forwarding Not Set"
+        },
+        {
+          "key": "waiting-first-email",
+          "label": "Waiting First Email"
+        },
+        {
+          "key": "confirmation-needed",
+          "label": "Confirmation Needed"
+        },
+        {
+          "key": "working",
+          "label": "Working"
+        },
+        {
+          "key": "no-emails",
+          "label": "No Emails"
+        },
+        {
+          "key": "test-sent",
+          "label": "Test Sent"
+        },
+        {
+          "key": "test-arrived",
+          "label": "Test Arrived"
+        },
+        {
+          "key": "test-failed",
+          "label": "Test Failed"
+        },
+        {
+          "key": "domain-connecting",
+          "label": "Domain Connecting"
+        },
+        {
+          "key": "domain-connected",
+          "label": "Domain Connected"
+        },
+        {
+          "key": "domain-broken",
+          "label": "Domain Broken"
+        },
+        {
+          "key": "no-social",
+          "label": "No Social"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Settings"
+    },
+    {
+      "id": "S-05",
+      "name": "People",
+      "slug": "people",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "just-owner",
+          "label": "Just Owner"
+        },
+        {
+          "key": "invite-pending",
+          "label": "Invite Pending"
+        },
+        {
+          "key": "invite-expired",
+          "label": "Invite Expired"
+        },
+        {
+          "key": "invite-failed",
+          "label": "Invite Failed"
+        },
+        {
+          "key": "already-invited",
+          "label": "Already Invited"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Settings"
+    },
+    {
+      "id": "S-06",
+      "name": "Notifications",
+      "slug": "notifications",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "permission-off",
+          "label": "Permission Off"
+        },
+        {
+          "key": "not-asked",
+          "label": "Not Asked"
+        },
+        {
+          "key": "quiet-now",
+          "label": "Quiet Now"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Settings"
+    },
+    {
+      "id": "S-07",
+      "name": "Running",
+      "slug": "running",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "paused-person",
+          "label": "Paused Person"
+        },
+        {
+          "key": "paused-credits",
+          "label": "Paused Credits"
+        },
+        {
+          "key": "plan-limit",
+          "label": "Plan Limit"
+        },
+        {
+          "key": "stopped",
+          "label": "Stopped"
+        },
+        {
+          "key": "computer-off",
+          "label": "Computer Off"
+        },
+        {
+          "key": "moving",
+          "label": "Moving"
+        },
+        {
+          "key": "restarting",
+          "label": "Restarting"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Settings"
+    },
+    {
+      "id": "S-08",
+      "name": "Account",
+      "slug": "account",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "editing",
+          "label": "Editing"
+        },
+        {
+          "key": "saved",
+          "label": "Saved"
+        },
+        {
+          "key": "save-failed",
+          "label": "Save Failed"
+        },
+        {
+          "key": "team-computer",
+          "label": "Team Computer"
+        },
+        {
+          "key": "closing",
+          "label": "Closing"
+        },
+        {
+          "key": "close-failed",
+          "label": "Close Failed"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Settings"
+    },
+    {
+      "id": "S-09",
+      "name": "Help and updates",
+      "slug": "help-and-updates",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "checking",
+          "label": "Checking"
+        },
+        {
+          "key": "downloading",
+          "label": "Downloading"
+        },
+        {
+          "key": "update-ready",
+          "label": "Update Ready"
+        },
+        {
+          "key": "update-failed",
+          "label": "Update Failed"
+        },
+        {
+          "key": "sending",
+          "label": "Sending"
+        },
+        {
+          "key": "sent",
+          "label": "Sent"
+        },
+        {
+          "key": "send-failed",
+          "label": "Send Failed"
+        },
+        {
+          "key": "loading",
+          "label": "Loading"
+        },
+        {
+          "key": "loading-slow",
+          "label": "Loading Slow"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        },
+        {
+          "key": "empty",
+          "label": "Empty"
+        }
+      ],
+      "phase": "Settings"
+    },
+    {
+      "id": "G-02",
+      "name": "Menu bar and tray",
+      "slug": "menu-bar-and-tray",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "first-run",
+          "label": "First run"
+        },
+        {
+          "key": "signed-out",
+          "label": "Signed out"
+        },
+        {
+          "key": "other-computer",
+          "label": "Other computer"
+        },
+        {
+          "key": "offline",
+          "label": "Offline"
+        },
+        {
+          "key": "update-ready",
+          "label": "Update ready"
+        },
+        {
+          "key": "needs-you",
+          "label": "Needs you"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "problem",
+          "label": "Problem"
+        }
+      ]
+    },
+    {
+      "id": "G-03",
+      "name": "Computer notifications",
+      "slug": "computer-notifications",
+      "defaultState": "decision",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "decision",
+          "label": "Decision"
+        },
+        {
+          "key": "several-decisions",
+          "label": "Several decisions"
+        },
+        {
+          "key": "employee-problem",
+          "label": "Employee problem"
+        },
+        {
+          "key": "scout-stopped",
+          "label": "Scout stopped"
+        },
+        {
+          "key": "team-stopped",
+          "label": "Team stopped"
+        },
+        {
+          "key": "team-paused",
+          "label": "Team paused"
+        },
+        {
+          "key": "credits-low",
+          "label": "Credits low"
+        },
+        {
+          "key": "morning-brief",
+          "label": "Morning brief"
+        },
+        {
+          "key": "friday-wrap",
+          "label": "Friday wrap"
+        },
+        {
+          "key": "time-to-post",
+          "label": "Time to post"
+        },
+        {
+          "key": "customer-waiting",
+          "label": "Customer waiting"
+        },
+        {
+          "key": "reply-to-you",
+          "label": "Reply to you"
+        },
+        {
+          "key": "team-moved",
+          "label": "Team moved"
+        },
+        {
+          "key": "quiet-hours",
+          "label": "Quiet hours"
+        },
+        {
+          "key": "notifications-off",
+          "label": "Notifications off"
+        },
+        {
+          "key": "handled-elsewhere",
+          "label": "Handled elsewhere"
+        },
+        {
+          "key": "looking-at-it",
+          "label": "Looking at it"
+        }
+      ]
+    },
+    {
+      "id": "G-04",
+      "name": "Banners",
+      "slug": "banners",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "multiple",
+          "label": "Multiple"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-05",
+      "name": "Keyboard",
+      "slug": "keyboard",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        }
+      ]
+    },
+    {
+      "id": "G-06",
+      "name": "Toasts and undo",
+      "slug": "toasts-and-undo",
+      "defaultState": "approved",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "approved",
+          "label": "Approved"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "posted",
+          "label": "Posted"
+        },
+        {
+          "key": "sent",
+          "label": "Sent"
+        },
+        {
+          "key": "copied",
+          "label": "Copied"
+        },
+        {
+          "key": "saved",
+          "label": "Saved"
+        },
+        {
+          "key": "archived",
+          "label": "Archived"
+        },
+        {
+          "key": "renamed",
+          "label": "Renamed"
+        },
+        {
+          "key": "invite",
+          "label": "Invite"
+        },
+        {
+          "key": "undo",
+          "label": "Undo"
+        }
+      ]
+    },
+    {
+      "id": "G-08",
+      "name": "Themes and sizes",
+      "slug": "themes-and-sizes",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "light",
+          "label": "Light"
+        },
+        {
+          "key": "dark",
+          "label": "Dark"
+        },
+        {
+          "key": "large",
+          "label": "Large"
+        },
+        {
+          "key": "larger",
+          "label": "Larger"
+        },
+        {
+          "key": "smallest",
+          "label": "Smallest"
+        },
+        {
+          "key": "large-smallest",
+          "label": "Large smallest"
+        },
+        {
+          "key": "full-screen",
+          "label": "Full screen"
+        },
+        {
+          "key": "reduced-motion",
+          "label": "Reduced motion"
+        },
+        {
+          "key": "higher-contrast",
+          "label": "Higher contrast"
+        }
+      ]
+    },
+    {
+      "id": "X-01",
+      "name": "Offline",
+      "slug": "offline",
+      "defaultState": "just-offline",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "just-offline",
+          "label": "Just offline"
+        },
+        {
+          "key": "offline-a-while",
+          "label": "Offline a while"
+        },
+        {
+          "key": "messages-waiting",
+          "label": "Messages waiting"
+        },
+        {
+          "key": "back-online",
+          "label": "Back online"
+        }
+      ]
+    },
+    {
+      "id": "X-02",
+      "name": "Colony unreachable",
+      "slug": "colony-unreachable",
+      "defaultState": "first-minutes",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "first-minutes",
+          "label": "First minutes"
+        },
+        {
+          "key": "longer",
+          "label": "Longer"
+        },
+        {
+          "key": "back",
+          "label": "Back"
+        }
+      ]
+    },
+    {
+      "id": "X-03",
+      "name": "While you were away",
+      "slug": "while-you-were-away",
+      "defaultState": "catching-up",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "catching-up",
+          "label": "Catching up"
+        },
+        {
+          "key": "caught-up",
+          "label": "Caught up"
+        },
+        {
+          "key": "long-time-off",
+          "label": "Long time off"
+        },
+        {
+          "key": "nothing-missed",
+          "label": "Nothing missed"
+        }
+      ]
+    },
+    {
+      "id": "X-04",
+      "name": "Credits low",
+      "slug": "credits-low",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "auto-top-up-failed",
+          "label": "Auto top up failed"
+        },
+        {
+          "key": "auto-top-up-limit",
+          "label": "Auto top up limit"
+        }
+      ]
+    },
+    {
+      "id": "X-05",
+      "name": "Credits out",
+      "slug": "credits-out",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        },
+        {
+          "key": "own-plan",
+          "label": "Own plan"
+        },
+        {
+          "key": "waiting-payment",
+          "label": "Waiting payment"
+        },
+        {
+          "key": "resumed",
+          "label": "Resumed"
+        }
+      ]
+    },
+    {
+      "id": "X-06",
+      "name": "Own plan limit reached",
+      "slug": "own-plan-limit-reached",
+      "defaultState": "known",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "known",
+          "label": "Known"
+        },
+        {
+          "key": "unknown",
+          "label": "Unknown"
+        },
+        {
+          "key": "using-credits",
+          "label": "Using credits"
+        },
+        {
+          "key": "plan-back",
+          "label": "Plan back"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "X-07",
+      "name": "Own plan disconnected",
+      "slug": "own-plan-disconnected",
+      "defaultState": "team-computer",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "team-computer",
+          "label": "Team computer"
+        },
+        {
+          "key": "other-computer",
+          "label": "Other computer"
+        },
+        {
+          "key": "signing-in",
+          "label": "Signing in"
+        },
+        {
+          "key": "sign-in-failed",
+          "label": "Sign in failed"
+        },
+        {
+          "key": "fixed",
+          "label": "Fixed"
+        }
+      ]
+    },
+    {
+      "id": "X-08",
+      "name": "Employee stuck or failing",
+      "slug": "employee-stuck-or-failing",
+      "defaultState": "open",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "open",
+          "label": "Open"
+        },
+        {
+          "key": "restarting",
+          "label": "Restarting"
+        },
+        {
+          "key": "back",
+          "label": "Back"
+        },
+        {
+          "key": "still-failing",
+          "label": "Still failing"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        }
+      ]
+    },
+    {
+      "id": "X-09",
+      "name": "Scout stopped",
+      "slug": "scout-stopped",
+      "defaultState": "open",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "open",
+          "label": "Open"
+        },
+        {
+          "key": "restarting",
+          "label": "Restarting"
+        },
+        {
+          "key": "back",
+          "label": "Back"
+        },
+        {
+          "key": "still-failing",
+          "label": "Still failing"
+        }
+      ]
+    },
+    {
+      "id": "X-10",
+      "name": "Team stopped",
+      "slug": "team-stopped",
+      "defaultState": "team-computer",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "team-computer",
+          "label": "Team computer"
+        },
+        {
+          "key": "other-computer",
+          "label": "Other computer"
+        },
+        {
+          "key": "restarting",
+          "label": "Restarting"
+        },
+        {
+          "key": "restart-failed",
+          "label": "Restart failed"
+        }
+      ]
+    },
+    {
+      "id": "X-11",
+      "name": "Update ready or required",
+      "slug": "update-ready-or-required",
+      "defaultState": "ready",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "ready",
+          "label": "Ready"
+        },
+        {
+          "key": "required",
+          "label": "Required"
+        },
+        {
+          "key": "updating",
+          "label": "Updating"
+        },
+        {
+          "key": "failed",
+          "label": "Failed"
+        },
+        {
+          "key": "updated",
+          "label": "Updated"
+        },
+        {
+          "key": "mac-launch",
+          "label": "Mac launch"
+        }
+      ]
+    },
+    {
+      "id": "X-12",
+      "name": "Signed out",
+      "slug": "signed-out",
+      "defaultState": "signed-out",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "signed-out",
+          "label": "Signed out"
+        },
+        {
+          "key": "removed",
+          "label": "Removed"
+        },
+        {
+          "key": "left",
+          "label": "Left"
+        },
+        {
+          "key": "company-closed",
+          "label": "Company closed"
+        },
+        {
+          "key": "missing-sign-in",
+          "label": "Missing sign in"
+        }
+      ]
+    },
+    {
+      "id": "X-13",
+      "name": "Team runs on another computer",
+      "slug": "team-runs-on-another-computer",
+      "defaultState": "unreachable",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "unreachable",
+          "label": "Unreachable"
+        },
+        {
+          "key": "moving",
+          "label": "Moving"
+        },
+        {
+          "key": "moved",
+          "label": "Moved"
+        },
+        {
+          "key": "computer-back",
+          "label": "Computer back"
+        },
+        {
+          "key": "old-computer",
+          "label": "Old computer"
+        }
+      ]
+    },
+    {
+      "id": "X-14",
+      "name": "First close of the window",
+      "slug": "first-close-of-the-window",
+      "defaultState": "team-mac",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "team-mac",
+          "label": "Team mac"
+        },
+        {
+          "key": "team-windows",
+          "label": "Team windows"
+        },
+        {
+          "key": "other-mac",
+          "label": "Other mac"
+        },
+        {
+          "key": "other-windows",
+          "label": "Other windows"
+        }
+      ]
+    },
+    {
+      "id": "X-15",
+      "name": "Quit",
+      "slug": "quit",
+      "defaultState": "team-computer",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "team-computer",
+          "label": "Team computer"
+        },
+        {
+          "key": "other-computer",
+          "label": "Other computer"
+        },
+        {
+          "key": "shutting-down",
+          "label": "Shutting down"
+        }
+      ]
+    },
+    {
+      "id": "X-16",
+      "name": "Confirmations",
+      "slug": "confirmations",
+      "defaultState": "asking",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "asking",
+          "label": "Asking"
+        },
+        {
+          "key": "working",
+          "label": "Working"
+        },
+        {
+          "key": "done",
+          "label": "Done"
+        },
+        {
+          "key": "failed",
+          "label": "Failed"
+        }
+      ]
+    },
+    {
+      "id": "X-17",
+      "name": "Empty states",
+      "slug": "empty-states",
+      "defaultState": "empty",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "empty",
+          "label": "Empty"
+        },
+        {
+          "key": "filled",
+          "label": "Filled"
+        }
+      ]
+    },
+    {
+      "id": "X-18",
+      "name": "Loading",
+      "slug": "loading",
+      "defaultState": "short",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "short",
+          "label": "Short"
+        },
+        {
+          "key": "placeholders",
+          "label": "Placeholders"
+        },
+        {
+          "key": "long",
+          "label": "Long"
+        },
+        {
+          "key": "very-long",
+          "label": "Very long"
+        },
+        {
+          "key": "done",
+          "label": "Done"
+        }
+      ]
+    },
+    {
+      "id": "X-19",
+      "name": "Problem messages",
+      "slug": "problem-messages",
+      "defaultState": "first",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "first",
+          "label": "First"
+        },
+        {
+          "key": "repeated",
+          "label": "Repeated"
+        },
+        {
+          "key": "fixed",
+          "label": "Fixed"
+        }
+      ]
+    },
+    {
+      "id": "X-20",
+      "name": "Permissions",
+      "slug": "permissions",
+      "defaultState": "not-asked",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "not-asked",
+          "label": "Not asked"
+        },
+        {
+          "key": "explaining",
+          "label": "Explaining"
+        },
+        {
+          "key": "allowed",
+          "label": "Allowed"
+        },
+        {
+          "key": "denied",
+          "label": "Denied"
+        },
+        {
+          "key": "no-device",
+          "label": "No device"
+        },
+        {
+          "key": "device-busy",
+          "label": "Device busy"
+        },
+        {
+          "key": "restart-needed",
+          "label": "Restart needed"
+        },
+        {
+          "key": "microphone",
+          "label": "Microphone explanation"
+        },
+        {
+          "key": "microphone-denied",
+          "label": "Microphone denied"
+        }
+      ]
+    },
+    {
+      "id": "X-21",
+      "name": "Can't run here",
+      "slug": "cant-run-here",
+      "defaultState": "old-mac",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "old-mac",
+          "label": "Old mac"
+        },
+        {
+          "key": "old-windows",
+          "label": "Old windows"
+        },
+        {
+          "key": "already-open",
+          "label": "Already open"
+        },
+        {
+          "key": "not-responding",
+          "label": "Not responding"
+        },
+        {
+          "key": "disk-low",
+          "label": "Disk low"
+        },
+        {
+          "key": "team-paused",
+          "label": "Team paused"
+        }
+      ]
+    },
+    {
+      "id": "X-22",
+      "name": "Team paused by a person",
+      "slug": "team-paused-by-a-person",
+      "defaultState": "paused",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "resuming",
+          "label": "Resuming"
+        },
+        {
+          "key": "resumed",
+          "label": "Resumed"
+        },
+        {
+          "key": "long-time",
+          "label": "Long time"
+        }
+      ]
+    },
+    {
+      "id": "W-01",
+      "name": "Landing page",
+      "slug": "landing-page",
+      "defaultState": "mac",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Outside the app",
+      "states": [
+        {
+          "key": "mac",
+          "label": "Mac"
+        },
+        {
+          "key": "windows",
+          "label": "Windows"
+        },
+        {
+          "key": "phone",
+          "label": "Phone"
+        },
+        {
+          "key": "unsupported",
+          "label": "Unsupported"
+        },
+        {
+          "key": "slow",
+          "label": "Slow"
+        }
+      ]
+    },
+    {
+      "id": "W-02",
+      "name": "Download and install",
+      "slug": "download-and-install",
+      "defaultState": "mac",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Outside the app",
+      "states": [
+        {
+          "key": "mac",
+          "label": "Mac"
+        },
+        {
+          "key": "windows",
+          "label": "Windows"
+        },
+        {
+          "key": "phone",
+          "label": "Phone"
+        },
+        {
+          "key": "unsupported",
+          "label": "Unsupported"
+        },
+        {
+          "key": "blocked",
+          "label": "Blocked"
+        },
+        {
+          "key": "signed",
+          "label": "Signed"
+        },
+        {
+          "key": "unsigned",
+          "label": "Unsigned"
+        },
+        {
+          "key": "old-mac",
+          "label": "Old mac"
+        }
+      ]
+    },
+    {
+      "id": "W-03",
+      "name": "Pricing",
+      "slug": "pricing",
+      "defaultState": "normal",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Outside the app",
+      "states": [
+        {
+          "key": "normal",
+          "label": "Normal"
+        },
+        {
+          "key": "unmeasured",
+          "label": "Unmeasured"
+        },
+        {
+          "key": "phone",
+          "label": "Phone"
+        }
+      ]
+    },
+    {
+      "id": "W-04",
+      "name": "Terms and privacy",
+      "slug": "terms-and-privacy",
+      "defaultState": "terms",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Outside the app",
+      "states": [
+        {
+          "key": "terms",
+          "label": "Terms"
+        },
+        {
+          "key": "privacy",
+          "label": "Privacy"
+        },
+        {
+          "key": "changed",
+          "label": "Changed"
+        },
+        {
+          "key": "phone",
+          "label": "Phone"
+        }
+      ]
+    },
+    {
+      "id": "W-05",
+      "name": "Payment pages",
+      "slug": "payment-pages",
+      "defaultState": "credits",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Outside the app",
+      "states": [
+        {
+          "key": "credits",
+          "label": "Credits"
+        },
+        {
+          "key": "hosting",
+          "label": "Hosting"
+        },
+        {
+          "key": "save-card",
+          "label": "Save card"
+        },
+        {
+          "key": "change-card",
+          "label": "Change card"
+        },
+        {
+          "key": "paid-open",
+          "label": "Paid open"
+        },
+        {
+          "key": "paid-closed",
+          "label": "Paid closed"
+        },
+        {
+          "key": "paid-phone",
+          "label": "Paid phone"
+        },
+        {
+          "key": "confirming",
+          "label": "Confirming"
+        },
+        {
+          "key": "cancelled",
+          "label": "Cancelled"
+        },
+        {
+          "key": "declined",
+          "label": "Declined"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "paid-hosting",
+          "label": "Hosting payment received"
+        }
+      ]
+    },
+    {
+      "id": "W-06",
+      "name": "Emails",
+      "slug": "emails",
+      "defaultState": "sign-in-code",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Outside the app",
+      "states": [
+        {
+          "key": "sign-in-code",
+          "label": "Sign in code"
+        },
+        {
+          "key": "partner-invite",
+          "label": "Partner invite"
+        },
+        {
+          "key": "receipt",
+          "label": "Receipt"
+        },
+        {
+          "key": "credits-low",
+          "label": "Credits low"
+        },
+        {
+          "key": "top-up-failed",
+          "label": "Top up failed"
+        },
+        {
+          "key": "credits-out",
+          "label": "Credits out"
+        },
+        {
+          "key": "hosting-failed",
+          "label": "Hosting failed"
+        },
+        {
+          "key": "website-paused",
+          "label": "Website paused"
+        },
+        {
+          "key": "company-closed",
+          "label": "Company closed"
+        },
+        {
+          "key": "partner-closed",
+          "label": "Partner closed"
+        },
+        {
+          "key": "bounced",
+          "label": "Bounced"
+        },
+        {
+          "key": "phone",
+          "label": "Phone"
+        }
+      ]
+    },
+    {
+      "id": "W-07",
+      "name": "Invite page",
+      "slug": "invite-page",
+      "defaultState": "valid",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Outside the app",
+      "states": [
+        {
+          "key": "valid",
+          "label": "Valid"
+        },
+        {
+          "key": "not-installed",
+          "label": "Not installed"
+        },
+        {
+          "key": "expired",
+          "label": "Expired"
+        },
+        {
+          "key": "joined",
+          "label": "Joined"
+        },
+        {
+          "key": "cancelled",
+          "label": "Cancelled"
+        },
+        {
+          "key": "invalid",
+          "label": "Invalid"
+        },
+        {
+          "key": "phone",
+          "label": "Phone"
+        },
+        {
+          "key": "company-closed",
+          "label": "Company closed"
+        }
+      ]
+    },
+    {
+      "id": "W-08",
+      "name": "The owner's website",
+      "slug": "the-owners-website",
+      "defaultState": "home",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Outside the app",
+      "states": [
+        {
+          "key": "home",
+          "label": "Home"
+        },
+        {
+          "key": "products",
+          "label": "Products"
+        },
+        {
+          "key": "product",
+          "label": "Product"
+        },
+        {
+          "key": "about",
+          "label": "About"
+        },
+        {
+          "key": "contact",
+          "label": "Contact"
+        },
+        {
+          "key": "faq",
+          "label": "Faq"
+        },
+        {
+          "key": "campaign",
+          "label": "Campaign"
+        },
+        {
+          "key": "form-sending",
+          "label": "Form sending"
+        },
+        {
+          "key": "form-sent",
+          "label": "Form sent"
+        },
+        {
+          "key": "form-problem",
+          "label": "Form problem"
+        },
+        {
+          "key": "sold-out",
+          "label": "Sold out"
+        },
+        {
+          "key": "campaign-ended",
+          "label": "Campaign ended"
+        },
+        {
+          "key": "preview",
+          "label": "Preview"
+        },
+        {
+          "key": "page-not-found",
+          "label": "Page not found"
+        },
+        {
+          "key": "paused",
+          "label": "Paused"
+        },
+        {
+          "key": "closed",
+          "label": "Closed"
+        },
+        {
+          "key": "phone",
+          "label": "Phone"
+        }
+      ]
+    },
+    {
+      "id": "W-09",
+      "name": "Website paused page",
+      "slug": "website-paused-page",
+      "defaultState": "unpaid",
+      "forms": [
+        "screen"
+      ],
+      "phase": "Outside the app",
+      "states": [
+        {
+          "key": "unpaid",
+          "label": "Unpaid"
+        },
+        {
+          "key": "cancelled",
+          "label": "Cancelled"
+        },
+        {
+          "key": "closed",
+          "label": "Closed"
+        },
+        {
+          "key": "restored",
+          "label": "Restored"
+        }
+      ]
+    },
+    {
+      "id": "G-04a",
+      "name": "Team stopped banner",
+      "slug": "team-stopped-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04b",
+      "name": "Scout stopped banner",
+      "slug": "scout-stopped-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04c",
+      "name": "Credits out banner",
+      "slug": "credits-out-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04d",
+      "name": "Plan limit banner",
+      "slug": "plan-limit-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04e",
+      "name": "Plan disconnected banner",
+      "slug": "plan-disconnected-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04f",
+      "name": "Offline banner",
+      "slug": "offline-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04g",
+      "name": "Colony unreachable banner",
+      "slug": "colony-unreachable-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04h",
+      "name": "Team computer off banner",
+      "slug": "team-computer-off-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04i",
+      "name": "Paused by a person banner",
+      "slug": "paused-by-a-person-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04j",
+      "name": "Website paused banner",
+      "slug": "website-paused-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04k",
+      "name": "Credits low banner",
+      "slug": "credits-low-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04l",
+      "name": "Update ready banner",
+      "slug": "update-ready-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04m",
+      "name": "Notifications off banner",
+      "slug": "notifications-off-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04n",
+      "name": "Images paused banner",
+      "slug": "images-paused-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04o",
+      "name": "Disk almost full banner",
+      "slug": "disk-almost-full-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    },
+    {
+      "id": "G-04p",
+      "name": "Terms updated banner",
+      "slug": "terms-updated-banner",
+      "defaultState": "owner",
+      "forms": [
+        "screen"
+      ],
+      "phase": "System",
+      "states": [
+        {
+          "key": "owner",
+          "label": "Owner"
+        },
+        {
+          "key": "partner",
+          "label": "Partner"
+        }
+      ]
+    }
+  ],
+  "phase": "Milestone 1, Conversations, Team, desks and Settings"
+}

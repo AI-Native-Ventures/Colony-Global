@@ -1,0 +1,693 @@
+part of '../compose_bar.dart';
+
+class _ComposeBarLayout extends HookWidget {
+  final Widget? voiceNoteRecorder;
+  final List<_PendingAttachment> attachments;
+  final ValueChanged<int> onRemoveAttachment;
+  final String? uploadError;
+  final bool isExpanded;
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final EditableTextContextMenuBuilder contextMenuBuilder;
+  final ValueChanged<KeyboardInsertedContent> onContentInserted;
+  final VoidCallback onVoiceNote;
+  final VoidCallback onSend;
+  final String resolvedHint;
+  final Color? surfaceColor;
+  final _AttachmentSurface attachmentSurface;
+  final ValueChanged<BuildContext> onAttachmentTap;
+  final VoidCallback onExpand;
+  final Animation<double> expansionAnimation;
+  final bool formattingOpen;
+  final VoidCallback onCloseFormatting;
+  final Duration motionDuration;
+  final Duration resizeDuration;
+  final void Function(String prefix, [String? suffix]) onFormat;
+  final VoidCallback onMention;
+  final VoidCallback onChannel;
+  final VoidCallback onEmoji;
+  final VoidCallback onOpenFormatting;
+  final bool canSend;
+  final bool hasPendingUploads;
+  final bool isSending;
+  final bool postEditorMode;
+  final bool enabled;
+  final bool fillWidth;
+
+  const _ComposeBarLayout({
+    required this.voiceNoteRecorder,
+    required this.attachments,
+    required this.onRemoveAttachment,
+    required this.uploadError,
+    required this.isExpanded,
+    required this.controller,
+    required this.focusNode,
+    required this.contextMenuBuilder,
+    required this.onContentInserted,
+    required this.onVoiceNote,
+    required this.onSend,
+    required this.resolvedHint,
+    this.surfaceColor,
+    required this.attachmentSurface,
+    required this.onAttachmentTap,
+    required this.onExpand,
+    required this.expansionAnimation,
+    required this.formattingOpen,
+    required this.onCloseFormatting,
+    required this.motionDuration,
+    required this.resizeDuration,
+    required this.onFormat,
+    required this.onMention,
+    required this.onChannel,
+    required this.onEmoji,
+    required this.onOpenFormatting,
+    required this.canSend,
+    required this.hasPendingUploads,
+    required this.isSending,
+    required this.postEditorMode,
+    required this.enabled,
+    required this.fillWidth,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final recordingTransition = useAnimationController(
+      duration: motionDuration,
+      reverseDuration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 140),
+      initialValue: voiceNoteRecorder == null ? 0 : 1,
+    );
+    useEffect(() {
+      if (voiceNoteRecorder == null) {
+        recordingTransition.reverse();
+      } else {
+        recordingTransition.forward();
+      }
+      return null;
+    }, [voiceNoteRecorder != null, motionDuration]);
+    return _DragDownToDismissKeyboard(
+      child: _buildBar(context, recordingTransition),
+    );
+  }
+
+  Widget _buildBar(
+    BuildContext context,
+    Animation<double> recordingTransition,
+  ) {
+    if (postEditorMode) return _buildPostEditor(context);
+
+    final trimmedDraft = controller.text.trim();
+    final collapsedText = trimmedDraft.isEmpty
+        ? resolvedHint
+        : trimmedDraft.replaceAll(RegExp(r'\s+'), ' ');
+    final hasVoiceNoteAttachment = attachments.any(
+      (attachment) => attachment.kind == _PendingAttachmentKind.voiceNote,
+    );
+    final composerContent = Column(
+      key: ValueKey(
+        hasVoiceNoteAttachment
+            ? 'composer-voice-note-preview-content'
+            : 'composer-standard-content',
+      ),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (attachments.isNotEmpty) ...[
+          _AttachmentStrip(
+            attachments: attachments,
+            onRemove: onRemoveAttachment,
+          ),
+          const SizedBox(height: Grid.xxs),
+        ],
+        if (uploadError case final error?) ...[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              error,
+              style: context.textTheme.bodySmall?.copyWith(
+                color: context.colors.error,
+              ),
+            ),
+          ),
+          const SizedBox(height: Grid.xxs),
+        ],
+        // Keep the default state out of the focus system entirely so
+        // restored native focus cannot expand a newly opened channel.
+        if (isExpanded)
+          resizeDuration == Duration.zero
+              ? KeyedSubtree(
+                  key: const ValueKey('composer-text-height-motion'),
+                  child: _buildTextField(context),
+                )
+              : AnimatedSize(
+                  key: const ValueKey('composer-text-height-motion'),
+                  alignment: Alignment.topCenter,
+                  duration: resizeDuration,
+                  curve: Curves.easeOutCubic,
+                  child: _buildTextField(context),
+                )
+        else
+          Row(
+            children: [
+              _AttachmentTrigger(
+                surface: attachmentSurface,
+                formattingOpen: false,
+                onTap: onAttachmentTap,
+              ),
+              const SizedBox(width: Grid.xxs),
+              Expanded(
+                child: Semantics(
+                  button: true,
+                  label: resolvedHint,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _runComposerAction(onExpand),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: Grid.half),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          collapsedText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: conversationComposerTextStyle.copyWith(
+                            color: trimmedDraft.isEmpty
+                                ? conversationMutedColor(context)
+                                : conversationInkColor(context),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: Grid.xxs),
+              _trailingAction(context),
+            ],
+          ),
+        _ExpandedComposerActionsMotion(
+          animation: expansionAnimation,
+          isExpanded: isExpanded,
+          child: Column(
+            children: [
+              const SizedBox(height: Grid.xxs),
+              Row(
+                children: [
+                  _AttachmentTrigger(
+                    surface: attachmentSurface,
+                    formattingOpen: formattingOpen,
+                    onTap: (triggerContext) {
+                      if (formattingOpen) {
+                        onCloseFormatting();
+                      } else {
+                        onAttachmentTap(triggerContext);
+                      }
+                    },
+                  ),
+                  const SizedBox(width: Grid.half),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: motionDuration,
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      layoutBuilder: (currentChild, previousChildren) => Stack(
+                        alignment: Alignment.centerLeft,
+                        children: [...previousChildren, ?currentChild],
+                      ),
+                      child: formattingOpen
+                          ? _FormattingToolbar(onFormat: onFormat)
+                          : Row(
+                              key: const ValueKey('standard-actions'),
+                              children: [
+                                _ComposeAction(
+                                  icon: LucideIcons.atSign,
+                                  onTap: onMention,
+                                ),
+                                _ComposeAction(
+                                  icon: LucideIcons.hash,
+                                  onTap: onChannel,
+                                ),
+                                _ComposeAction(
+                                  icon: LucideIcons.smilePlus,
+                                  onTap: onEmoji,
+                                ),
+                                _ComposeAction(
+                                  icon: LucideIcons.aLargeSmall,
+                                  onTap: onOpenFormatting,
+                                ),
+                                const Spacer(),
+                                _trailingAction(context),
+                              ],
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    final contentMotionDuration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 140);
+    final content = ClipRect(
+      child: AnimatedSwitcher(
+        key: const ValueKey('composer-content-morph'),
+        duration: contentMotionDuration,
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeOutCubic,
+        layoutBuilder: (currentChild, previousChildren) => Stack(
+          alignment: Alignment.bottomCenter,
+          children: [...previousChildren, ?currentChild],
+        ),
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: SizeTransition(
+            sizeFactor: animation,
+            axisAlignment: 1,
+            child: child,
+          ),
+        ),
+        child: voiceNoteRecorder == null
+            ? composerContent
+            : KeyedSubtree(
+                key: const ValueKey('composer-voice-note-content'),
+                child: voiceNoteRecorder!,
+              ),
+      ),
+    );
+    return AnimatedBuilder(
+      animation: Listenable.merge([expansionAnimation, recordingTransition]),
+      child: content,
+      builder: (context, child) {
+        final collapsedRadius = fillWidth
+            ? Radii.container
+            : Radii.dialog + Grid.quarter;
+        final expandedRadius = fillWidth ? Radii.container : Radii.dialog;
+        final restingRadius = hasVoiceNoteAttachment
+            ? collapsedRadius
+            : lerpDouble(
+                collapsedRadius,
+                expandedRadius,
+                expansionAnimation.value,
+              )!;
+        final radius = BorderRadius.circular(
+          lerpDouble(restingRadius, Radii.full, recordingTransition.value)!,
+        );
+        final usesIosConcentricSurface =
+            defaultTargetPlatform == TargetPlatform.iOS;
+        final voiceNoteInsetProgress = hasVoiceNoteAttachment
+            ? 1.0
+            : recordingTransition.value;
+        final composer = Container(
+          key: const ValueKey('composer-surface'),
+          decoration: BoxDecoration(
+            color: usesIosConcentricSurface
+                ? Colors.transparent
+                : surfaceColor ?? context.colors.surface,
+            borderRadius: radius,
+            border: Border.all(color: context.mobileTokens.line, width: 1),
+          ),
+          padding: EdgeInsets.symmetric(
+            horizontal: Grid.xxs + Grid.half * voiceNoteInsetProgress,
+            vertical:
+                (fillWidth ? Grid.xxs - 1.5 : Grid.xxs) +
+                Grid.half * voiceNoteInsetProgress,
+          ),
+          child: child,
+        );
+        if (!usesIosConcentricSurface) return composer;
+        return ConcentricSheetSurface(
+          key: const ValueKey('composer-ios-concentric-surface'),
+          enabled: true,
+          usesGlass: true,
+          color: surfaceColor ?? context.colors.surface,
+          padding: EdgeInsets.zero,
+          providesSheetSurface: false,
+          minimumRadius: radius.topLeft.x,
+          contentClipRadius: radius.topLeft.x,
+          child: composer,
+        );
+      },
+    );
+  }
+
+  Widget _trailingAction(BuildContext context) {
+    if (controller.text.trim().isEmpty && attachments.isEmpty && !isSending) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _VoiceNoteButton(isDisabled: hasPendingUploads, onTap: onVoiceNote),
+          _SendButton(isDisabled: true, isSending: false, onTap: onSend),
+        ],
+      );
+    }
+    return _SendButton(
+      isDisabled: !canSend || hasPendingUploads,
+      isSending: isSending,
+      onTap: onSend,
+    );
+  }
+
+  Widget _buildTextField(BuildContext context) {
+    return TextField(
+      controller: controller,
+      focusNode: focusNode,
+      keyboardType: TextInputType.multiline,
+      textInputAction: TextInputAction.newline,
+      enabled: enabled,
+      contextMenuBuilder: contextMenuBuilder,
+      // Flutter's Cupertino magnifier rebuilds its overlay on every
+      // selection-handle update. Keep the iOS handles and native edit menu,
+      // but let the handles track the finger directly here.
+      magnifierConfiguration: defaultTargetPlatform == TargetPlatform.iOS
+          ? TextMagnifierConfiguration.disabled
+          : null,
+      contentInsertionConfiguration: ContentInsertionConfiguration(
+        allowedMimeTypes: _pastedImageMimeTypes,
+        onContentInserted: onContentInserted,
+      ),
+      minLines: 1,
+      maxLines: 5,
+      style: conversationComposerTextStyle.copyWith(
+        color: conversationInkColor(context),
+      ),
+      decoration: InputDecoration(
+        hintText: resolvedHint,
+        hintStyle: conversationComposerTextStyle.copyWith(
+          color: conversationMutedColor(context),
+        ),
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: Grid.half,
+          vertical: Grid.half,
+        ),
+        isDense: true,
+      ),
+    );
+  }
+
+  Widget _buildPostEditor(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 260,
+          child: TextField(
+            key: const ValueKey('forum-post-body'),
+            controller: controller,
+            focusNode: focusNode,
+            enabled: enabled,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            contextMenuBuilder: contextMenuBuilder,
+            magnifierConfiguration: defaultTargetPlatform == TargetPlatform.iOS
+                ? TextMagnifierConfiguration.disabled
+                : null,
+            contentInsertionConfiguration: ContentInsertionConfiguration(
+              allowedMimeTypes: _pastedImageMimeTypes,
+              onContentInserted: onContentInserted,
+            ),
+            minLines: null,
+            maxLines: null,
+            style: context.mobileTypography.body.copyWith(
+              color: context.mobileTokens.ink,
+              fontSize: 14,
+              height: 1.8,
+            ),
+            decoration: InputDecoration(
+              hintText: resolvedHint,
+              hintStyle: context.mobileTypography.body.copyWith(
+                color: context.mobileTokens.muted,
+                fontSize: 14,
+                height: 1.8,
+              ),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
+              contentPadding: EdgeInsets.zero,
+              isDense: true,
+            ),
+          ),
+        ),
+        if (attachments.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          for (var index = 0; index < attachments.length; index++) ...[
+            _PostAttachmentRow(
+              key: ValueKey('compose-post-attachment:${attachments[index].id}'),
+              attachment: attachments[index],
+              enabled: enabled,
+              onRemove: () => onRemoveAttachment(attachments[index].id),
+            ),
+            if (index < attachments.length - 1) const SizedBox(height: 10),
+          ],
+        ],
+        if (enabled) ...[
+          const SizedBox(height: 15),
+          Builder(
+            builder: (buttonContext) => CustomPaint(
+              painter: _DashedRoundedBorder(
+                color: context.mobileTokens.line,
+                radius: 9,
+              ),
+              child: SizedBox(
+                height: 44,
+                child: TextButton.icon(
+                  onPressed: () => onAttachmentTap(buttonContext),
+                  style: TextButton.styleFrom(
+                    foregroundColor: context.mobileTokens.ink,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  icon: const Icon(LucideIcons.file, size: 18),
+                  label: const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Add attachments'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _PostAttachmentRow extends HookWidget {
+  final _PendingAttachment attachment;
+  final bool enabled;
+  final VoidCallback onRemove;
+
+  const _PostAttachmentRow({
+    super.key,
+    required this.attachment,
+    required this.enabled,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fileLength = useMemoized(attachment.file.length, [attachment.file]);
+    final length = useFuture(fileLength).data;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
+      decoration: BoxDecoration(
+        color: context.mobileTokens.soft,
+        border: Border.all(color: context.mobileTokens.line),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            attachment.kind == _PendingAttachmentKind.image
+                ? LucideIcons.image
+                : attachment.kind == _PendingAttachmentKind.video
+                ? LucideIcons.video
+                : LucideIcons.file,
+            size: 18,
+            color: context.mobileTokens.muted,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  attachment.file.name.isEmpty ? 'File' : attachment.file.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.mobileTypography.body.copyWith(
+                    color: context.mobileTokens.ink,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (length != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: Text(
+                      '${_postAttachmentSize(length)} · ${enabled ? 'Ready to attach' : 'Attachment'}',
+                      style: context.mobileTypography.body.copyWith(
+                        color: context.mobileTokens.muted,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (enabled)
+            IconButton(
+              onPressed: onRemove,
+              tooltip: 'Remove attachment',
+              constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+              padding: const EdgeInsets.all(4),
+              icon: const Icon(LucideIcons.x, size: 16),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashedRoundedBorder extends CustomPainter {
+  final Color color;
+  final double radius;
+
+  const _DashedRoundedBorder({required this.color, required this.radius});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(rect.deflate(0.5), Radius.circular(radius)),
+      );
+    final stroke = Paint()
+      ..color = color
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+
+    for (final metric in path.computeMetrics()) {
+      for (var start = 0.0; start < metric.length; start += 8) {
+        canvas.drawPath(
+          metric.extractPath(start, math.min(start + 4, metric.length)),
+          stroke,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedRoundedBorder oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.radius != radius;
+}
+
+String _postAttachmentSize(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).round()} KB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+class _ExpandedComposerActionsMotion extends StatelessWidget {
+  final Animation<double> animation;
+  final bool isExpanded;
+  final Widget child;
+
+  const _ExpandedComposerActionsMotion({
+    required this.animation,
+    required this.isExpanded,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      child: child,
+      builder: (context, child) {
+        final value = animation.value;
+        final progress = value.clamp(0.0, 1.0).toDouble();
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            heightFactor: value,
+            child: IgnorePointer(
+              ignoring: !isExpanded,
+              child: Opacity(
+                opacity: progress,
+                child: Transform.translate(
+                  offset: Offset(0, Grid.xxs * (1 - progress)),
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Drag the compose bar downward to put the keyboard away.
+///
+/// Continues the gesture the message list starts: once your finger reaches the
+/// composer, keep pulling down and the keyboard goes with it. Uses a raw
+/// [Listener] rather than a `GestureDetector` on purpose — a gesture recognizer
+/// here would enter the arena against the `TextField` and could steal taps,
+/// caret placement, and selection drags. A [Listener] only observes.
+class _DragDownToDismissKeyboard extends HookWidget {
+  final Widget child;
+
+  const _DragDownToDismissKeyboard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    // A ref, not state: pointer travel must not rebuild the composer, which
+    // would churn the TextField mid-gesture.
+    final downwardTravel = useRef(0.0);
+    final startedInEditable = useRef(false);
+
+    return Listener(
+      onPointerDown: (event) {
+        downwardTravel.value = 0;
+        final hitTest = HitTestResult();
+        RendererBinding.instance.hitTestInView(
+          hitTest,
+          event.position,
+          event.viewId,
+        );
+        startedInEditable.value = hitTest.path.any(
+          (entry) => entry.target is RenderEditable,
+        );
+      },
+      onPointerCancel: (_) {
+        downwardTravel.value = 0;
+        startedInEditable.value = false;
+      },
+      onPointerUp: (_) {
+        downwardTravel.value = 0;
+        startedInEditable.value = false;
+      },
+      onPointerMove: (event) {
+        if (startedInEditable.value) return;
+        final dy = event.delta.dy;
+        if (dy <= 0) {
+          downwardTravel.value = 0;
+          return;
+        }
+        downwardTravel.value += dy;
+        if (downwardTravel.value < keyboardDismissDragThreshold) return;
+        downwardTravel.value = 0;
+        dismissKeyboard(context);
+      },
+      child: child,
+    );
+  }
+}

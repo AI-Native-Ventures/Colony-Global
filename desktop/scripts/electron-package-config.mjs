@@ -1,0 +1,159 @@
+import path from "node:path";
+
+export const ELECTRON_BUNDLE_ID = "xyz.block.buzz.app.electron";
+
+const SUPPORTED_PLATFORMS = new Set(["darwin", "win32", "linux"]);
+const SUPPORTED_ARCHITECTURES = new Set(["arm64", "x64"]);
+
+function assertPlatform(platform) {
+  if (!SUPPORTED_PLATFORMS.has(platform)) {
+    throw new Error(
+      `Unsupported platform ${JSON.stringify(platform)}. Use darwin, win32, or linux.`,
+    );
+  }
+}
+
+function assertArchitecture(arch) {
+  if (!SUPPORTED_ARCHITECTURES.has(arch)) {
+    throw new Error(
+      `Unsupported architecture ${JSON.stringify(arch)}. Use arm64 or x64.`,
+    );
+  }
+}
+
+export function parseElectronPackageArgs(args) {
+  const options = {};
+
+  for (const argument of args) {
+    const separator = argument.indexOf("=");
+    const flag = separator === -1 ? argument : argument.slice(0, separator);
+    const value = separator === -1 ? "" : argument.slice(separator + 1);
+    const key = {
+      "--platform": "platform",
+      "--arch": "arch",
+      "--host": "host",
+      "--sidecar-dir": "sidecarDir",
+    }[flag];
+
+    if (!key) throw new Error(`Unknown argument ${JSON.stringify(argument)}.`);
+    if (Object.hasOwn(options, key))
+      throw new Error(`${flag} was specified more than once.`);
+    if (!value) throw new Error(`${flag} cannot be empty.`);
+    options[key] = value;
+  }
+
+  if (!options.platform) throw new Error("--platform is required.");
+  if (!options.arch) throw new Error("--arch is required.");
+  assertPlatform(options.platform);
+  assertArchitecture(options.arch);
+
+  return options;
+}
+
+export function electronPackagePaths({ desktop, platform, arch }) {
+  assertPlatform(platform);
+  assertArchitecture(arch);
+
+  const packageName = `${platform}-${arch}`;
+  const packagerOutputDir = path.join(desktop, "dist-electron");
+
+  return {
+    outputDir: path.join(packagerOutputDir, packageName),
+    archivePath: path.join(
+      packagerOutputDir,
+      `${packageName}${platform === "linux" ? ".tar.gz" : ".zip"}`,
+    ),
+    packagerOutputDir,
+  };
+}
+
+export function nativeHostFilename(platform) {
+  assertPlatform(platform);
+  return `colony-native-host${platform === "win32" ? ".exe" : ""}`;
+}
+
+export function sidecarFilenames(platform) {
+  assertPlatform(platform);
+  const extension = platform === "win32" ? ".exe" : "";
+  const binaries = [
+    "buzz-acp",
+    "buzz-agent",
+    "buzz-dev-mcp",
+    "git-credential-nostr",
+    "buzz",
+  ];
+  if (platform !== "win32") binaries.push("buzz-backend-kubernetes");
+  return binaries.map((binary) => `${binary}${extension}`);
+}
+
+// Colony app icon, without extension: the packager appends .icns or .ico.
+export const APP_ICON_BASENAME = "icon";
+
+// A bundle that is modified after Electron signs it (renamed executable, new
+// Info.plist, extra resources) carries a stale seal, and macOS then reports the
+// app as "damaged" with no way to open it. Unsigned builds are re-signed ad hoc
+// over the whole bundle so the seal is valid and Gatekeeper offers Open Anyway.
+export function adhocSignArguments(appPath) {
+  return ["--force", "--deep", "--sign", "-", appPath];
+}
+
+export function verifySignatureArguments(appPath) {
+  return ["--verify", "--deep", "--strict", appPath];
+}
+
+export function createPackagerOptions({
+  dir,
+  out,
+  productName,
+  appVersion,
+  electronVersion,
+  platform,
+  arch,
+  extraResource,
+  icon,
+  osxSign,
+  osxNotarize,
+  deepLinkSchemes = [],
+}) {
+  assertPlatform(platform);
+  assertArchitecture(arch);
+
+  return {
+    dir,
+    out,
+    name: productName,
+    executableName: productName,
+    appBundleId: ELECTRON_BUNDLE_ID,
+    appVersion,
+    electronVersion,
+    platform,
+    arch,
+    asar: true,
+    prune: false,
+    overwrite: true,
+    extraResource,
+    ...(icon ? { icon } : {}),
+    ...(platform === "darwin"
+      ? {
+          extendInfo: {
+            NSMicrophoneUsageDescription:
+              "Your microphone is used to send and receive audio in huddles.",
+          },
+        }
+      : {}),
+    // macOS only routes a URL scheme to an app that declares it in Info.plist
+    // (CFBundleURLTypes); setAsDefaultProtocolClient cannot add it at runtime.
+    ...(platform === "darwin" && deepLinkSchemes.length > 0
+      ? {
+          protocols: [
+            { name: `${productName} link`, schemes: deepLinkSchemes },
+          ],
+        }
+      : {}),
+    ...(platform === "darwin" && osxSign ? { osxSign } : {}),
+    ...(platform === "darwin" && osxNotarize ? { osxNotarize } : {}),
+    ...(platform === "win32"
+      ? { win32metadata: { CompanyName: productName } }
+      : {}),
+  };
+}

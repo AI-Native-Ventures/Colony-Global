@@ -1,0 +1,55 @@
+export type AccountAuthRecord = {
+  id: string;
+  email: string;
+  pubkey: string;
+  hasPassword: boolean;
+  googleLinked: boolean;
+};
+
+export type AccountAuthVerificationSent = {
+  status: "verification_sent";
+  retryAfterSecs?: number;
+};
+
+export type AccountEmailSignInCodeSent = {
+  sent: true;
+  retryAfterSecs: number;
+};
+
+/**
+ * Desktop account API consumed by onboarding and the persistent claim prompt.
+ * The auth feature owns transport, NIP-98 signing, OAuth, and error parsing.
+ */
+export type AccountAuthClient = {
+  startEmailSignIn(email: string): Promise<AccountEmailSignInCodeSent>;
+  verifyEmailSignIn(
+    email: string,
+    code: string,
+    termsVersion: string,
+  ): Promise<AccountAuthRecord>;
+  signUp(
+    email: string,
+    password: string,
+    displayName?: string,
+  ): Promise<AccountAuthVerificationSent>;
+  verifyEmail(email: string, code: string): Promise<AccountAuthRecord>;
+  resendCode(
+    email: string,
+    purpose: "verify" | "reset",
+  ): Promise<AccountAuthVerificationSent>;
+  signIn(email: string, password: string): Promise<AccountAuthRecord>;
+  signInWithGoogle(termsVersion?: string): Promise<AccountAuthRecord>;
+  requestReset(email: string): Promise<AccountAuthVerificationSent>;
+  checkResetCode(email: string, code: string): Promise<void>;
+  confirmReset(
+    email: string,
+    code: string,
+    newPassword: string,
+  ): Promise<AccountAuthRecord>;
+  claimAccount(
+    email: string,
+    password: string,
+  ): Promise<AccountAuthVerificationSent>;
+  changePassword(newPassword: string): Promise<void>;
+  getAccount(): Promise<AccountAuthRecord | null>;
+};

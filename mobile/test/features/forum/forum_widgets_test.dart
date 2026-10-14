@@ -1,0 +1,935 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:buzz/features/channels/compose_bar.dart';
+import 'package:buzz/features/channels/message_content.dart';
+import 'package:buzz/features/forum/forum_models.dart';
+import 'package:buzz/features/forum/forum_post_card.dart';
+import 'package:buzz/features/forum/forum_presentation.dart';
+import 'package:buzz/features/forum/forum_posts_view.dart';
+import 'package:buzz/features/forum/forum_provider.dart';
+import 'package:buzz/features/forum/forum_thread_page.dart';
+import 'package:buzz/features/profile/profile_provider.dart';
+import 'package:buzz/shared/mentions/agent_identity_provider.dart';
+import 'package:buzz/shared/identity/identity_components.dart';
+import 'package:buzz/shared/profile/user_cache_provider.dart';
+import 'package:buzz/shared/profile/user_profile.dart';
+import 'package:buzz/shared/relay/relay.dart';
+import 'package:buzz/shared/theme/theme.dart';
+import 'package:buzz/shared/widgets/avatar_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+const _channelId = 'forum-channel';
+
+ForumPost _makePost({
+  String eventId = 'post1',
+  String pubkey = 'alice',
+  String content = 'Hello forum',
+  int createdAt = 1000,
+  List<List<String>> tags = const [
+    ['h', 'forum-channel'],
+  ],
+  ForumThreadSummary? threadSummary,
+}) => ForumPost(
+  eventId: eventId,
+  pubkey: pubkey,
+  content: content,
+  kind: 45001,
+  createdAt: createdAt,
+  channelId: _channelId,
+  tags: tags,
+  threadSummary: threadSummary,
+);
+
+const _aliceProfile = UserProfile(pubkey: 'alice', displayName: 'Alice');
+
+ForumPresentationFactories _testForumPresentation() =>
+    ForumPresentationFactories(
+      composeBarBuilder:
+          ({
+            required channelId,
+            required channelName,
+            required hintText,
+            required onSend,
+            draftKeyOverride,
+            postEditorMode = false,
+            allowEmptySend = false,
+            enabled = true,
+            submitController,
+            onBodyChanged,
+            onAttachmentCountChanged,
+            onSubmissionChanged,
+            onFailure,
+          }) => ComposeBar(
+            channelId: channelId,
+            channelName: channelName,
+            hintText: hintText,
+            onSend: onSend,
+            draftKeyOverride: draftKeyOverride,
+            postEditorMode: postEditorMode,
+            allowEmptySend: allowEmptySend,
+            enabled: enabled,
+            submitController: submitController,
+            onBodyChanged: onBodyChanged,
+            onAttachmentCountChanged: onAttachmentCountChanged,
+            onSubmissionChanged: onSubmissionChanged,
+            onFailure: onFailure,
+          ),
+      messageContentBuilder: (context, content) => MessageContent(
+        content: content.content,
+        mentionNames: content.mentionNames,
+        agentMentionPubkeys: content.agentMentionPubkeys,
+        channelNames: const {'design-forum': _channelId},
+        tags: content.tags,
+        baseStyle: content.baseStyle,
+        maxLines: content.maxLines,
+        onMentionTap: content.onMentionTap,
+      ),
+      openProfile: (context, pubkey) {},
+    );
+
+void _setSurfaceSize(WidgetTester tester, Size size) {
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = size;
+}
+
+Widget _buildPostCard({
+  required ForumPost post,
+  String? currentPubkey = 'self',
+  Map<String, UserProfile> users = const {},
+  VoidCallback? onTap,
+  void Function(String)? onDelete,
+  TextScaler textScaler = TextScaler.noScaling,
+  Set<String> knownAgentPubkeys = const {},
+}) {
+  return ProviderScope(
+    overrides: [
+      userCacheProvider.overrideWith(() => _FakeUserCacheNotifier(users)),
+      knownAgentPubkeysProvider.overrideWithValue(knownAgentPubkeys),
+    ],
+    child: MaterialApp(
+      theme: AppTheme.light(),
+      home: Builder(
+        builder: (context) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+          child: Scaffold(
+            body: ForumPostCard(
+              post: post,
+              currentPubkey: currentPubkey,
+              onTap: onTap ?? () {},
+              onDelete: onDelete,
+              presentation: _testForumPresentation(),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildPostsView({
+  required ForumPostsResponse postsResponse,
+  bool isMember = true,
+  bool isArchived = false,
+  Map<String, UserProfile> users = const {},
+}) {
+  return ProviderScope(
+    overrides: [
+      userCacheProvider.overrideWith(() => _FakeUserCacheNotifier(users)),
+      profileProvider.overrideWith(() => _FakeProfileNotifier()),
+      forumPostsProvider(_channelId).overrideWith((ref) async => postsResponse),
+      relayClientProvider.overrideWithValue(
+        RelayClient(baseUrl: 'http://localhost:3000'),
+      ),
+    ],
+    child: MaterialApp(
+      theme: AppTheme.light(),
+      home: Scaffold(
+        body: ForumPostsView(
+          channelId: _channelId,
+          channelName: 'design-forum',
+          currentPubkey: 'self',
+          isMember: isMember,
+          isArchived: isArchived,
+          presentation: _testForumPresentation(),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Shared mock prefs for the compose bar's draft store. Initialized in
+/// [main].
+late SharedPreferences _testPrefs;
+
+Widget _buildThreadPage({
+  required ForumThreadResponse threadResponse,
+  String postEventId = 'post1',
+  String? currentPubkey = 'self',
+  bool isMember = true,
+  bool isArchived = false,
+  Map<String, UserProfile> users = const {},
+  Set<String> knownAgentPubkeys = const {},
+  Set<String> channelBotPubkeys = const {},
+  TextScaler textScaler = TextScaler.noScaling,
+}) {
+  return ProviderScope(
+    overrides: [
+      userCacheProvider.overrideWith(() => _FakeUserCacheNotifier(users)),
+      knownAgentPubkeysProvider.overrideWithValue(knownAgentPubkeys),
+      channelBotPubkeysProvider(
+        _channelId,
+      ).overrideWith((ref) async => channelBotPubkeys),
+      profileProvider.overrideWith(() => _FakeProfileNotifier()),
+      forumThreadProvider((
+        channelId: _channelId,
+        eventId: postEventId,
+      )).overrideWith((ref) async => threadResponse),
+      savedPrefsProvider.overrideWithValue(_testPrefs),
+      relayClientProvider.overrideWithValue(
+        RelayClient(baseUrl: 'http://localhost:3000'),
+      ),
+    ],
+    child: MaterialApp(
+      theme: AppTheme.light(),
+      home: Builder(
+        builder: (context) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+          child: ForumThreadPage(
+            channelId: _channelId,
+            postEventId: postEventId,
+            currentPubkey: currentPubkey,
+            isMember: isMember,
+            isArchived: isArchived,
+            presentation: _testForumPresentation(),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+void main() {
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    _testPrefs = await SharedPreferences.getInstance();
+  });
+
+  test('cancels a captured forum delivery after the community changes', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container
+        .read(relayConfigProvider.notifier)
+        .update(baseUrl: 'https://first.example');
+    final delivery = ForumEventDelivery.capture(container);
+
+    container
+        .read(relayConfigProvider.notifier)
+        .update(baseUrl: 'https://second.example');
+
+    expect(
+      delivery.createPost(channelId: _channelId, content: 'Queued post'),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('active community changed'),
+        ),
+      ),
+    );
+  });
+
+  group('ForumPostCard', () {
+    testWidgets('matches the v5 team note card hierarchy', (tester) async {
+      await tester.pumpWidget(
+        _buildPostCard(
+          post: _makePost(
+            content:
+                'This week at Lerato\n\nThe work that matters this week: '
+                'Olive Studio, Cedar’s launch, and client reports.',
+            threadSummary: ForumThreadSummary(
+              replyCount: 3,
+              descendantCount: 3,
+              lastReplyAt:
+                  DateTime(2026, 9, 28, 9).millisecondsSinceEpoch ~/ 1000,
+              participants: const ['alice'],
+            ),
+          ),
+          users: const {'alice': _aliceProfile},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Alice'), findsOneWidget);
+      expect(find.text('This week at Lerato'), findsOneWidget);
+      expect(
+        find.text(
+          'The work that matters this week: Olive Studio, Cedar’s launch, '
+          'and client reports.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('3 replies'), findsOneWidget);
+      expect(find.text('Open note'), findsOneWidget);
+      expect(
+        tester.getRect(find.text('3 replies')).right,
+        lessThan(tester.getRect(find.text('Open note')).left),
+      );
+      final avatar = tester.widget<IdentityAvatar>(find.byType(IdentityAvatar));
+      expect(avatar.initials, 'A');
+      expect(avatar.kind, IdentityKind.person);
+    });
+
+    testWidgets('uses a compact fallback identity in the card footer', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildPostCard(
+          post: _makePost(
+            pubkey:
+                'abcdef0000000000000000000000000000000000000000000000000000000000',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('npub140x…etzk'), findsOneWidget);
+    });
+
+    testWidgets('keeps the reply footer usable at large text size', (
+      tester,
+    ) async {
+      _setSurfaceSize(tester, const Size(240, 600));
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      await tester.pumpWidget(
+        _buildPostCard(
+          post: _makePost(createdAt: 1),
+          users: const {
+            'alice': UserProfile(
+              pubkey: 'alice',
+              displayName: 'A very long forum author name',
+            ),
+          },
+          textScaler: const TextScaler.linear(2),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('replies'), findsOneWidget);
+      expect(find.text('Open note'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('limits the post preview to three lines', (tester) async {
+      await tester.pumpWidget(
+        _buildPostCard(post: _makePost(content: 'Title\n${'A' * 300}')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<MessageContent>(find.byType(MessageContent)).maxLines,
+        3,
+      );
+    });
+
+    testWidgets('shows reply count with correct pluralization', (tester) async {
+      await tester.pumpWidget(
+        _buildPostCard(
+          post: _makePost(
+            threadSummary: const ForumThreadSummary(
+              replyCount: 1,
+              descendantCount: 1,
+              participants: [],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('1 reply'), findsOneWidget);
+
+      await tester.pumpWidget(
+        _buildPostCard(
+          post: _makePost(
+            threadSummary: const ForumThreadSummary(
+              replyCount: 5,
+              descendantCount: 5,
+              participants: [],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('5 replies'), findsOneWidget);
+    });
+
+    testWidgets('exposes the message actions accessibility action', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildPostCard(post: _makePost()));
+      await tester.pumpAndSettle();
+
+      final actions = tester
+          .widgetList<Semantics>(find.byType(Semantics))
+          .map(
+            (node) => node.properties.customSemanticsActions?.keys ?? const [],
+          )
+          .expand((keys) => keys)
+          .map((action) => action.label);
+      expect(actions, contains('Message actions'));
+    });
+
+    testWidgets('calls onTap when tapped', (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(
+        _buildPostCard(post: _makePost(), onTap: () => tapped = true),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(ForumPostCard));
+      expect(tapped, isTrue);
+    });
+
+    testWidgets('keeps media previews non-interactive in the post list', (
+      tester,
+    ) async {
+      var tapped = false;
+      const imageUrl = 'https://example.com/media/card.png';
+
+      await tester.pumpWidget(
+        _buildPostCard(
+          post: _makePost(
+            content: '![image]($imageUrl)',
+            tags: const [
+              ['h', _channelId],
+              [
+                'imeta',
+                'url https://example.com/media/card.png',
+                'm image/png',
+              ],
+            ],
+          ),
+          onTap: () => tapped = true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final preview = find.byKey(
+        const ValueKey(
+          'message-media-image-preview:https://example.com/media/card.png',
+        ),
+      );
+      await tester.tapAt(tester.getCenter(preview));
+      await tester.pumpAndSettle();
+
+      expect(tapped, isTrue);
+      expect(
+        find.byKey(const ValueKey('message-media-image-viewer')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('long press opens the post action sheet', (tester) async {
+      await tester.pumpWidget(_buildPostCard(post: _makePost()));
+      await tester.pumpAndSettle();
+
+      await tester.longPress(find.byType(ForumPostCard));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Copy text'), findsOneWidget);
+    });
+
+    testWidgets('delete confirmation triggers onDelete for own posts', (
+      tester,
+    ) async {
+      String? deletedId;
+      await tester.pumpWidget(
+        _buildPostCard(
+          post: _makePost(pubkey: 'self', eventId: 'evt-to-delete'),
+          currentPubkey: 'self',
+          onDelete: (id) => deletedId = id,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.longPress(find.byType(ForumPostCard));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete post'));
+      await tester.pumpAndSettle();
+      expect(find.text('This cannot be undone.'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+      await tester.pumpAndSettle();
+
+      expect(deletedId, 'evt-to-delete');
+    });
+  });
+
+  group('ForumPostsView', () {
+    testWidgets('shows empty state for members', (tester) async {
+      await tester.pumpWidget(
+        _buildPostsView(postsResponse: const ForumPostsResponse(posts: [])),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('No posts yet'), findsOneWidget);
+      expect(
+        find.text('Start a discussion by creating the first post.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shows empty state for non-members', (tester) async {
+      await tester.pumpWidget(
+        _buildPostsView(
+          postsResponse: const ForumPostsResponse(posts: []),
+          isMember: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Join this forum to create posts.'), findsOneWidget);
+    });
+
+    testWidgets('does not overlay notes with a floating compose button', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildPostsView(postsResponse: const ForumPostsResponse(posts: [])),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(FloatingActionButton), findsNothing);
+    });
+
+    testWidgets('renders post list', (tester) async {
+      await tester.pumpWidget(
+        _buildPostsView(
+          postsResponse: ForumPostsResponse(
+            posts: [
+              _makePost(content: 'First post'),
+              _makePost(eventId: 'post2', content: 'Second post'),
+            ],
+          ),
+          users: const {'alice': _aliceProfile},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('First post'), findsOneWidget);
+      expect(find.text('Second post'), findsOneWidget);
+    });
+  });
+
+  group('ForumThreadPage', () {
+    AvatarImage avatarIn(WidgetTester tester, Key key) =>
+        tester.widget<AvatarImage>(
+          find.descendant(
+            of: find.byKey(key),
+            matching: find.byType(AvatarImage),
+          ),
+        );
+
+    testWidgets(
+      'uses directory classification for an uncached original author',
+      (tester) async {
+        await tester.pumpWidget(
+          _buildThreadPage(
+            threadResponse: ForumThreadResponse(
+              post: _makePost(pubkey: 'directory-agent'),
+              replies: const [],
+              totalReplies: 0,
+            ),
+            knownAgentPubkeys: const {'directory-agent'},
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          avatarIn(
+            tester,
+            const ValueKey('forum-original-avatar-post1'),
+          ).isAgent,
+          isTrue,
+        );
+      },
+    );
+
+    testWidgets('uses bot-role classification for an uncached reply author', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(),
+            replies: const [
+              ThreadReply(
+                eventId: 'bot-reply',
+                pubkey: 'channel-bot',
+                content: 'Automated reply',
+                kind: 45003,
+                createdAt: 2000,
+                channelId: _channelId,
+                tags: [
+                  ['h', _channelId],
+                ],
+                depth: 1,
+              ),
+            ],
+            totalReplies: 1,
+          ),
+          users: const {'alice': _aliceProfile},
+          channelBotPubkeys: const {'channel-bot'},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        avatarIn(
+          tester,
+          const ValueKey('forum-reply-avatar-bot-reply'),
+        ).isAgent,
+        isTrue,
+      );
+      expect(
+        avatarIn(tester, const ValueKey('forum-original-avatar-post1')).isAgent,
+        isFalse,
+      );
+    });
+
+    testWidgets('shows team note header and empty discussion', (tester) async {
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(content: 'Thread root'),
+            replies: const [],
+            totalReplies: 0,
+          ),
+          users: const {'alice': _aliceProfile},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Team note'), findsOneWidget); // App bar title
+      expect(find.text('Discussion'), findsOneWidget);
+      expect(find.text('No replies yet'), findsOneWidget);
+      expect(find.text('Thread root'), findsOneWidget);
+    });
+
+    testWidgets('renders replies in the discussion', (tester) async {
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(),
+            replies: [
+              const ThreadReply(
+                eventId: 'r1',
+                pubkey: 'bob',
+                content: 'Great post!',
+                kind: 45003,
+                createdAt: 2000,
+                channelId: _channelId,
+                tags: [
+                  ['h', _channelId],
+                ],
+                depth: 1,
+              ),
+            ],
+            totalReplies: 1,
+          ),
+          users: const {
+            'alice': _aliceProfile,
+            'bob': UserProfile(pubkey: 'bob', displayName: 'Bob'),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Discussion'), findsOneWidget);
+      expect(find.text('Bob'), findsOneWidget);
+      expect(find.text('Great post!'), findsOneWidget);
+    });
+
+    testWidgets('constrains post and reply timestamps at large text sizes', (
+      tester,
+    ) async {
+      final oldTimestamp =
+          DateTime.utc(2025, 12, 31, 12).millisecondsSinceEpoch ~/ 1000;
+
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(createdAt: oldTimestamp),
+            replies: [
+              ThreadReply(
+                eventId: 'old-reply',
+                pubkey: 'bob',
+                content: 'An older reply',
+                kind: 45003,
+                createdAt: oldTimestamp,
+                channelId: _channelId,
+                tags: const [
+                  ['h', _channelId],
+                ],
+                depth: 1,
+              ),
+            ],
+            totalReplies: 1,
+          ),
+          users: const {
+            'alice': _aliceProfile,
+            'bob': UserProfile(
+              pubkey: 'bob',
+              displayName: 'A very long reply author name',
+            ),
+          },
+          textScaler: const TextScaler.linear(2),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final timestamps = [
+        tester.widget<Text>(find.byKey(const ValueKey('forum-post-timestamp'))),
+        tester.widget<Text>(
+          find.byKey(const ValueKey('forum-reply-timestamp-old-reply')),
+        ),
+      ];
+      for (final timestamp in timestamps) {
+        expect(timestamp.data, isNotEmpty);
+        expect(timestamp.maxLines, 1);
+        expect(timestamp.overflow, TextOverflow.ellipsis);
+      }
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('gives thread authors unused timestamp width', (tester) async {
+      _setSurfaceSize(tester, const Size(320, 800));
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      // Keep the fixture on the same local day when CI runs after midnight.
+      final now = DateTime.now();
+      final createdAt =
+          DateTime(now.year, now.month, now.day).millisecondsSinceEpoch ~/ 1000;
+      const postAuthor = 'A moderately long original author';
+      const replyAuthor = 'A moderately long reply author';
+
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(createdAt: createdAt),
+            replies: [
+              ThreadReply(
+                eventId: 'reply',
+                pubkey: 'bob',
+                content: 'A reply',
+                kind: 45003,
+                createdAt: createdAt,
+                channelId: _channelId,
+                tags: const [
+                  ['h', _channelId],
+                ],
+                depth: 1,
+              ),
+            ],
+            totalReplies: 1,
+          ),
+          users: const {
+            'alice': UserProfile(pubkey: 'alice', displayName: postAuthor),
+            'bob': UserProfile(pubkey: 'bob', displayName: replyAuthor),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.getSize(find.text(postAuthor)).width, greaterThan(150));
+      expect(tester.getSize(find.text(replyAuthor)).width, greaterThan(140));
+      final postTimestamp = tester.widget<Text>(
+        find.byKey(const ValueKey('forum-post-timestamp')),
+      );
+      final replyTimestamp = tester.widget<Text>(
+        find.byKey(const ValueKey('forum-reply-timestamp-reply')),
+      );
+      expect(postTimestamp.data, startsWith('Today, '));
+      expect(replyTimestamp.data, matches(RegExp(r'^\d{2}:\d{2}$')));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('shows compose bar for members', (tester) async {
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(),
+            replies: const [],
+            totalReplies: 0,
+          ),
+          isMember: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reply to this post\u2026'), findsOneWidget);
+    });
+
+    testWidgets('renders media previews for forum posts', (tester) async {
+      const imageUrl = 'https://example.com/media/forum.png';
+
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(
+              content: '![image]($imageUrl)',
+              tags: const [
+                ['h', _channelId],
+                [
+                  'imeta',
+                  'url https://example.com/media/forum.png',
+                  'm image/png',
+                ],
+              ],
+            ),
+            replies: const [],
+            totalReplies: 0,
+          ),
+          users: const {'alice': _aliceProfile},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(
+          const ValueKey(
+            'message-media-image-preview:https://example.com/media/forum.png',
+          ),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('keeps tall forum image previews bounded inline', (
+      tester,
+    ) async {
+      _setSurfaceSize(tester, const Size(400, 800));
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      const imageUrl = 'https://example.com/media/forum-tall.png';
+
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(
+              content: '![image]($imageUrl)',
+              tags: const [
+                ['h', _channelId],
+                [
+                  'imeta',
+                  'url https://example.com/media/forum-tall.png',
+                  'm image/png',
+                  'dim 1200x2400',
+                ],
+              ],
+            ),
+            replies: const [],
+            totalReplies: 0,
+          ),
+          users: const {'alice': _aliceProfile},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final preview = find.byKey(
+        const ValueKey(
+          'message-media-image-preview:https://example.com/media/forum-tall.png',
+        ),
+      );
+      final size = tester.getSize(preview);
+
+      expect(size.height, closeTo(240, 0.1));
+      expect(size.width, closeTo(120, 0.1));
+    });
+
+    testWidgets('hides compose bar for non-members', (tester) async {
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(),
+            replies: const [],
+            totalReplies: 0,
+          ),
+          isMember: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reply to this post\u2026'), findsNothing);
+    });
+
+    testWidgets('keeps own-post actions available by long press', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(pubkey: 'self', content: 'Owned note'),
+            replies: const [],
+            totalReplies: 0,
+          ),
+          currentPubkey: 'self',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('Post actions'), findsNothing);
+      await tester.longPress(find.text('Owned note'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Copy text'), findsOneWidget);
+      expect(find.text('Delete post'), findsOneWidget);
+    });
+
+    testWidgets('does not expose own-post actions for others posts', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildThreadPage(
+          threadResponse: ForumThreadResponse(
+            post: _makePost(pubkey: 'alice', content: 'Other note'),
+            replies: const [],
+            totalReplies: 0,
+          ),
+          currentPubkey: 'self',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('Post actions'), findsNothing);
+      await tester.longPress(find.text('Other note'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Copy text'), findsNothing);
+      expect(find.text('Delete post'), findsNothing);
+    });
+  });
+}
+
+class _FakeUserCacheNotifier extends UserCacheNotifier {
+  final Map<String, UserProfile> _users;
+  _FakeUserCacheNotifier(this._users);
+
+  @override
+  Map<String, UserProfile> build() => _users;
+
+  @override
+  UserProfile? get(String pubkey) => _users[pubkey.toLowerCase()];
+}
+
+class _FakeProfileNotifier extends ProfileNotifier {
+  @override
+  Future<UserProfile?> build() async =>
+      const UserProfile(pubkey: 'self', displayName: 'Self');
+}

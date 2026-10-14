@@ -1,0 +1,262 @@
+import { normalizeRelayUrl } from "@/features/profile/lib/selfProfileStorage";
+import { ACCENT_COLORS, DEFAULT_ACCENT } from "./ThemeProvider";
+import { SYNTAX_THEMES, type SyntaxThemeName } from "./theme-loader";
+import {
+  nextPreferenceWriteTime,
+  preferenceWriteTime,
+} from "@/shared/lib/preferenceWriteTime";
+
+const STORAGE_KEY_PREFIX = "buzz-community-theme.v1";
+const OUTBOX_KEY_PREFIX = "buzz-community-theme-outbox.v1";
+const MIGRATION_KEY_PREFIX = "buzz-community-theme-migrated.v1";
+
+export type CommunityThemePreference = {
+  version: 1;
+  theme: SyntaxThemeName;
+  accent: string;
+  followSystem: boolean;
+};
+
+export const DEFAULT_COMMUNITY_THEME: CommunityThemePreference = Object.freeze({
+  version: 1,
+  theme: "buzz",
+  accent: DEFAULT_ACCENT,
+  followSystem: true,
+});
+
+const THEME_NAMES = new Set<string>(SYNTAX_THEMES);
+const ACCENTS = new Set<string>([
+  ...ACCENT_COLORS.map(({ value }) => value.toLowerCase()),
+  "#895af6",
+  "#74717b",
+]);
+
+export function communityThemeStorageKey(
+  pubkey: string,
+  relayUrl: string,
+): string {
+  return `${STORAGE_KEY_PREFIX}:${pubkey}:${encodeURIComponent(normalizeRelayUrl(relayUrl))}`;
+}
+
+export function communityThemeOutboxKey(
+  pubkey: string,
+  relayUrl: string,
+): string {
+  return `${OUTBOX_KEY_PREFIX}:${pubkey}:${encodeURIComponent(normalizeRelayUrl(relayUrl))}`;
+}
+
+export function parseCommunityThemePreference(
+  value: unknown,
+): CommunityThemePreference | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.version !== 1 ||
+    typeof candidate.theme !== "string" ||
+    !THEME_NAMES.has(candidate.theme) ||
+    typeof candidate.accent !== "string" ||
+    !ACCENTS.has(candidate.accent.toLowerCase()) ||
+    typeof candidate.followSystem !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    version: 1,
+    theme: candidate.theme as SyntaxThemeName,
+    accent: candidate.accent,
+    followSystem: candidate.followSystem,
+  };
+}
+
+export function readCommunityThemePreference(
+  pubkey: string,
+  relayUrl: string,
+): CommunityThemePreference | null {
+  try {
+    const raw = window.localStorage.getItem(
+      communityThemeStorageKey(pubkey, relayUrl),
+    );
+    return raw ? parseCommunityThemePreference(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readCommunityThemeOutbox(
+  pubkey: string,
+  relayUrl: string,
+): CommunityThemePreference | null {
+  try {
+    const raw = window.localStorage.getItem(
+      communityThemeOutboxKey(pubkey, relayUrl),
+    );
+    return raw ? parseCommunityThemePreference(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCommunityThemeOutbox(
+  pubkey: string,
+  relayUrl: string,
+  preference: CommunityThemePreference,
+): boolean {
+  try {
+    window.localStorage.setItem(
+      communityThemeOutboxKey(pubkey, relayUrl),
+      JSON.stringify({ ...preference, updatedAt: nextPreferenceWriteTime() }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearCommunityThemeOutbox(
+  pubkey: string,
+  relayUrl: string,
+  acknowledged: CommunityThemePreference,
+): void {
+  const pending = readCommunityThemeOutbox(pubkey, relayUrl);
+  if (!pending || !sameCommunityThemePreference(pending, acknowledged)) return;
+  try {
+    window.localStorage.removeItem(communityThemeOutboxKey(pubkey, relayUrl));
+  } catch {
+    // A later retry can safely publish the same replaceable event again.
+  }
+}
+
+export function hasMigratedCommunityTheme(pubkey: string): boolean {
+  try {
+    return (
+      window.localStorage.getItem(`${MIGRATION_KEY_PREFIX}:${pubkey}`) ===
+      "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function markCommunityThemeMigrated(pubkey: string): void {
+  try {
+    window.localStorage.setItem(`${MIGRATION_KEY_PREFIX}:${pubkey}`, "true");
+  } catch {
+    // The preference itself remains usable in memory when storage is full.
+  }
+}
+
+export function writeCommunityThemePreference(
+  pubkey: string,
+  relayUrl: string,
+  preference: CommunityThemePreference,
+): boolean {
+  try {
+    window.localStorage.setItem(
+      communityThemeStorageKey(pubkey, relayUrl),
+      JSON.stringify({ ...preference, updatedAt: nextPreferenceWriteTime() }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Read the local write clock for a preference or its durable pending edit. */
+export function readCommunityThemeWriteTime(
+  pubkey: string,
+  relayUrl: string,
+  outbox = false,
+): number {
+  try {
+    const key = outbox
+      ? communityThemeOutboxKey(pubkey, relayUrl)
+      : communityThemeStorageKey(pubkey, relayUrl);
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return 0;
+    const value = JSON.parse(raw);
+    return parseCommunityThemePreference(value)
+      ? preferenceWriteTime(value.updatedAt)
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function cacheAndApplyCommunityTheme(
+  pubkey: string,
+  relayUrl: string,
+  preference: CommunityThemePreference,
+  apply: (preference: CommunityThemePreference) => void,
+): void {
+  writeCommunityThemePreference(pubkey, relayUrl, preference);
+  apply(preference);
+}
+
+export function communityThemeScopeFallback(
+  migrated: boolean,
+  inherited: CommunityThemePreference,
+): CommunityThemePreference {
+  return migrated ? DEFAULT_COMMUNITY_THEME : inherited;
+}
+
+export function sameCommunityThemePreference(
+  left: CommunityThemePreference,
+  right: CommunityThemePreference,
+): boolean {
+  return (
+    left.theme === right.theme &&
+    left.accent === right.accent &&
+    left.followSystem === right.followSystem
+  );
+}
+
+export function communityThemeApplyExpectation(
+  preference: CommunityThemePreference,
+  current: CommunityThemePreference,
+  preserveNoop = false,
+): CommunityThemePreference | null {
+  return preserveNoop || !sameCommunityThemePreference(preference, current)
+    ? preference
+    : null;
+}
+
+/**
+ * Decide whether the current context value is safe to persist for this scope.
+ * Applying a scoped preference updates the outer ThemeProvider asynchronously,
+ * so renders that still expose the previous scope must be deferred.
+ */
+export function communityThemePersistenceAction(
+  expectedApplied: CommunityThemePreference | null,
+  current: CommunityThemePreference,
+): "persist" | "defer" | "acknowledge" {
+  if (!expectedApplied) return "persist";
+  return sameCommunityThemePreference(expectedApplied, current)
+    ? "acknowledge"
+    : "defer";
+}
+
+/** Select the newest durable local theme revision, preserving dirty-first legacy ties. */
+export function newestCommunityThemePreference(
+  candidates: {
+    preference: CommunityThemePreference | null;
+    updatedAt: number;
+  }[],
+): CommunityThemePreference | null {
+  let winner: {
+    preference: CommunityThemePreference;
+    updatedAt: number;
+  } | null = null;
+  for (const candidate of candidates) {
+    if (
+      candidate.preference &&
+      (!winner || candidate.updatedAt > winner.updatedAt)
+    )
+      winner = {
+        preference: candidate.preference,
+        updatedAt: candidate.updatedAt,
+      };
+  }
+  return winner?.preference ?? null;
+}

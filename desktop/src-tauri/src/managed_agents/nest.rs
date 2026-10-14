@@ -1,0 +1,1030 @@
+//! Colony nest: persistent agent workspace at `~/.colony` for new installs
+//! (existing installs keep `~/.buzz`, see [`super::nest_folder`]).
+//!
+//! Creates a shared knowledge directory on first launch so every
+//! Buzz-spawned agent starts with orientation (AGENTS.md) and a
+//! place to accumulate research, plans, and logs across sessions.
+//!
+//! Static template content in AGENTS.md (above the managed-section markers)
+//! and SKILL.md is refreshed when the embedded template version changes.
+
+use super::{load_managed_agents, load_personas, AgentDefinition, ManagedAgentRecord};
+#[cfg(test)]
+use super::{BackendKind, RespondTo};
+use crate::app_state::AppState;
+use crate::commands::{capture_relay_target, fetch_archived_pubkeys_at};
+use std::collections::HashSet;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager};
+
+use crate::managed_agents::discovery::known_skill_dirs;
+use crate::managed_agents::nest_folder;
+#[cfg(unix)]
+use crate::util::create_symlink;
+
+/// Subdirectories created inside the nest.
+/// `REPOS` is intentionally absent: it is provisioned by
+/// [`super::repos::ensure_repos_symlink`], which makes it either a real directory (default)
+/// or a symlink to a user-configured `repos_dir`. Creating it here
+/// unconditionally would race a future symlink re-point.
+const NEST_DIRS: &[&str] = &[
+    "GUIDES",
+    "RESEARCH",
+    "PLANS",
+    "WORK_LOGS",
+    "OUTBOX",
+    ".scratch",
+];
+
+/// Default AGENTS.md content written on first init.
+/// Fully static — no runtime interpolation, no secrets, no user paths.
+pub(crate) const AGENTS_MD: &str = include_str!("nest_agents.md");
+
+/// Default SKILL.md content for the colony-cli skill.
+/// Written to `<nest>/.agents/skills/colony-cli/SKILL.md` on first init.
+///
+/// It ends with the web task rules. Their one copy is `web_tasks.md` in
+/// buzz-acp, which is also the end of every agent's base prompt
+/// ([`buzz_acp::WEB_TASK_RULES`]); the file is included here because a const
+/// cannot be built from another crate's const.
+const COLONY_CLI_SKILL_MD: &str = concat!(
+    include_str!("nest_skill.md"),
+    "\n",
+    include_str!("../../../../crates/buzz-acp/src/web_tasks.md")
+);
+
+/// Template content version for AGENTS.md static content (above managed markers).
+/// Bump this when changing `nest_agents.md` to trigger refresh on existing installs.
+/// Version 1 is implicitly "before this mechanism existed" (no version file).
+/// Version 7 renamed the managed-section markers (see [`BEGIN_MARKER`]); the
+/// refresh rewrites the markers of an existing block in place, so every
+/// install ends up with the current markers and keeps the text below them.
+const NEST_AGENTS_VERSION: u32 = 7;
+
+/// Template content version for SKILL.md.
+/// Bump this when changing `nest_skill.md` to trigger refresh on existing installs.
+/// Version 7 renamed the skill from `buzz-cli` to `colony-cli`.
+/// Version 8 added the web task rules (see [`COLONY_CLI_SKILL_MD`]).
+const NEST_SKILL_VERSION: u32 = 8;
+
+/// Prefix of the line that opens the managed section of AGENTS.md. Agents read
+/// this line, so it carries the product name.
+const BEGIN_MARKER: &str = "<!-- BEGIN COLONY MANAGED";
+
+/// The full opening line [`upsert_managed_section`] writes, and the line the
+/// template carries.
+const BEGIN_LINE: &str =
+    "<!-- BEGIN COLONY MANAGED - regenerated automatically, do not edit below -->";
+
+/// The line that closes the managed section.
+const END_MARKER: &str = "<!-- END COLONY MANAGED -->";
+
+/// Markers that builds before the rename wrote. They are match patterns only:
+/// files written by those builds still carry them, and the section is found by
+/// them so its owner's notes survive. Nothing writes them any more, and the
+/// first refresh or upsert of a file replaces them with the markers above.
+const LEGACY_BEGIN_MARKER: &str = "<!-- BEGIN BUZZ MANAGED";
+const LEGACY_END_MARKER: &str = "<!-- END BUZZ MANAGED -->";
+
+/// Opening and closing markers of either generation, current one first.
+const BEGIN_MARKERS: [&str; 2] = [BEGIN_MARKER, LEGACY_BEGIN_MARKER];
+const END_MARKERS: [&str; 2] = [END_MARKER, LEGACY_END_MARKER];
+
+/// Directory name of the generated CLI skill, under the canonical skills
+/// directory and under every harness-specific skills directory.
+#[cfg_attr(not(unix), allow(dead_code))]
+const SKILL_NAME: &str = "colony-cli";
+
+/// Canonical skill directory path relative to the nest root.
+const CANONICAL_SKILL_DIR: &str = ".agents/skills/colony-cli";
+
+/// Name the generated CLI skill had before it was renamed to [`SKILL_NAME`].
+/// Only [`retire_legacy_skill_entries`] still touches it.
+const LEGACY_SKILL_NAME: &str = "buzz-cli";
+
+/// Canonical directory of the legacy skill, relative to the nest root.
+const LEGACY_CANONICAL_SKILL_DIR: &str = ".agents/skills/buzz-cli";
+
+/// Process-lifetime nest directory. Initialized once at startup via
+/// [`init_nest_dir`] before any call to [`nest_dir`].
+///
+/// `None` inside the `OnceLock` means "home dir was unresolvable at init time".
+/// The outer `None` from `OnceLock::get` means "not initialized yet" —
+/// [`nest_dir`] falls back to the production choice in that case, ensuring
+/// test code that never calls [`init_nest_dir`] still works.
+static NEST_DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
+/// Initialize the process-lifetime nest directory.
+///
+/// Must be called once at app startup (before any call to [`nest_dir`] that
+/// may result in a filesystem operation). Subsequent calls are no-ops — the
+/// `OnceLock` is set exactly once.
+///
+/// `is_dev` should be `true` when the running binary is a dev build — i.e.
+/// when the Tauri app-data directory name starts with `"xyz.block.buzz.app.dev"`.
+/// Pass `false` for production (signed DMG) builds.
+///
+/// Production builds pick `~/.colony` for a new install and keep an existing
+/// `~/.buzz` (see [`nest_folder`]). The choice only reads the filesystem and
+/// is logged once, on the call that sets it.
+pub fn init_nest_dir(is_dev: bool) {
+    let Some(home) = dirs::home_dir() else {
+        let _ = NEST_DIR.set(None);
+        return;
+    };
+    let (path, choice) = nest_folder::resolve_nest_dir(&home, is_dev);
+    // set() is a no-op when already initialized, which is correct: only the
+    // first call (at boot, before any filesystem work) should win. Log only
+    // the call that wins so the line always names the folder actually used.
+    if NEST_DIR.set(Some(path)).is_ok() {
+        eprintln!("{}", choice.log_line(&home));
+    }
+}
+
+/// Returns the nest root path (`~/.colony` for a new production install,
+/// `~/.buzz` for an existing one, `~/.buzz-dev` for dev), or `None` if the
+/// home directory cannot be resolved.
+///
+/// If [`init_nest_dir`] has not been called yet (e.g. in unit tests), falls
+/// back to the production choice for the current home directory.
+pub fn nest_dir() -> Option<PathBuf> {
+    match NEST_DIR.get() {
+        Some(path) => path.clone(),
+        // Not yet initialized: fall back to the production choice. Covers
+        // test code.
+        None => dirs::home_dir().map(|home| nest_folder::resolve_nest_dir(&home, false).0),
+    }
+}
+
+/// Creates the nest folder (see [`nest_dir`]) if it doesn't already exist.
+///
+/// Delegates to [`ensure_nest_at`] with the resolved nest directory.
+/// Returns an error string if the home directory cannot be resolved.
+pub fn ensure_nest() -> Result<(), String> {
+    let root = nest_dir().ok_or("cannot resolve home directory for nest")?;
+    ensure_nest_at(&root)
+}
+
+/// Creates a Buzz nest at the given `root` path.
+///
+/// - Creates the root directory and all subdirectories.
+/// - Writes `AGENTS.md` only if it doesn't already exist.
+/// - Writes `.agents/skills/colony-cli/SKILL.md` only if it doesn't already exist.
+/// - Creates harness-specific symlinks pointing to the canonical
+///   `.agents/skills/colony-cli` directory for each known provider.
+/// - Retires the generated `buzz-cli` skill entries left by earlier builds.
+/// - Sets 700 permissions on the root, all subdirectories, and the skill
+///   directory tree (Unix).
+///
+/// Idempotent: safe to call on every launch. Static template content in
+/// AGENTS.md (above the managed-section markers) and SKILL.md is refreshed
+/// when the embedded template version changes. The managed section in AGENTS.md
+/// and any user content below it are preserved.
+///
+/// Rejects symlinks at the root path to prevent redirect attacks.
+///
+/// Errors are returned as strings for Tauri compatibility; callers
+/// should log and continue rather than aborting app startup.
+pub fn ensure_nest_at(root: &Path) -> Result<(), String> {
+    // Reject symlinks — we want a real directory, not a redirect.
+    // Platform-independent: symlink_metadata works on all OS.
+    if root
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(format!(
+            "{} is a symlink; refusing to use as nest root",
+            root.display()
+        ));
+    }
+
+    // Create root and all subdirectories. create_dir_all is idempotent —
+    // it succeeds silently if the directory already exists.
+    fs::create_dir_all(root).map_err(|e| format!("create {}: {e}", root.display()))?;
+
+    for dir in NEST_DIRS {
+        let path = root.join(dir);
+        fs::create_dir_all(&path).map_err(|e| format!("create {}: {e}", path.display()))?;
+    }
+
+    // REPOS is provisioned separately from NEST_DIRS: it may be a symlink to a
+    // user-configured repos_dir (applied later via apply_workspace), so setup
+    // must not clobber an existing configured symlink. See repos.rs.
+    super::repos::ensure_repos_setup_default(root)?;
+
+    // Write AGENTS.md only if it doesn't already exist.
+    // Uses create_new (O_CREAT|O_EXCL) to atomically check-and-create,
+    // closing the TOCTOU gap that exists() + write() would leave open.
+    // Also guarantees we never clobber a user-edited file.
+    let agents_md = root.join("AGENTS.md");
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&agents_md)
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            file.write_all(AGENTS_MD.as_bytes())
+                .map_err(|e| format!("write {}: {e}", agents_md.display()))?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // File already exists — leave it alone (idempotent).
+        }
+        Err(e) => {
+            return Err(format!("create {}: {e}", agents_md.display()));
+        }
+    }
+
+    // Write the colony-cli skill to the harness-agnostic .agents path.
+    // Entries of the pre-rename buzz-cli skill are retired below.
+    let agents_skill_dir = root.join(CANONICAL_SKILL_DIR);
+    fs::create_dir_all(&agents_skill_dir)
+        .map_err(|e| format!("create {}: {e}", agents_skill_dir.display()))?;
+
+    let skill_md = agents_skill_dir.join("SKILL.md");
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&skill_md)
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            file.write_all(COLONY_CLI_SKILL_MD.as_bytes())
+                .map_err(|e| format!("write {}: {e}", skill_md.display()))?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => {
+            return Err(format!("create {}: {e}", skill_md.display()));
+        }
+    }
+
+    // Create harness-specific symlinks for all known providers.
+    // ensure_skill_symlinks skips paths that already exist.
+    ensure_skill_symlinks(root)?;
+
+    // Refresh static content if the embedded template version is newer.
+    refresh_agents_md_if_stale(root)?;
+    refresh_skill_md_if_stale(root)?;
+
+    // The colony-cli skill is now in place, so the pre-rename skill can go.
+    // Runs on every call, not only on a version bump: an older build that is
+    // launched once and then upgraded again recreates the legacy entries.
+    retire_legacy_skill_entries(root)?;
+
+    // Set owner-only permissions on root and all subdirectories.
+    // Skip any path that is a symlink — chmod would affect the target.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(root, perms.clone())
+            .map_err(|e| format!("set permissions on {}: {e}", root.display()))?;
+        for dir in NEST_DIRS {
+            let path = root.join(dir);
+            let is_symlink = path
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            if !is_symlink {
+                fs::set_permissions(&path, perms.clone())
+                    .map_err(|e| format!("set permissions on {}: {e}", path.display()))?;
+            }
+        }
+        // REPOS is provisioned outside NEST_DIRS (it may be a symlink). Only
+        // chmod it when it is a real directory — chmod on a symlink would
+        // affect the user's external repos_dir target.
+        let repos_path = root.join("REPOS");
+        let repos_is_symlink = repos_path
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+        if !repos_is_symlink {
+            fs::set_permissions(&repos_path, perms.clone())
+                .map_err(|e| format!("set permissions on {}: {e}", repos_path.display()))?;
+        }
+        // Skill directory trees inside root get 700.
+        // Build the list from canonical path + all known provider skill dirs.
+        let mut skill_perm_dirs = Vec::new();
+        {
+            let mut accumulated = std::path::PathBuf::new();
+            for component in std::path::Path::new(CANONICAL_SKILL_DIR).components() {
+                accumulated.push(component);
+                skill_perm_dirs.push(root.join(&accumulated));
+            }
+        }
+        for skill_dir in known_skill_dirs() {
+            // Ensure every ancestor dir gets 700, not just the leaf.
+            let mut accumulated = std::path::PathBuf::new();
+            for component in std::path::Path::new(skill_dir).components() {
+                accumulated.push(component);
+                skill_perm_dirs.push(root.join(&accumulated));
+            }
+        }
+        for dir in skill_perm_dirs {
+            let is_symlink = dir
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            if !is_symlink {
+                fs::set_permissions(&dir, perms.clone())
+                    .map_err(|e| format!("set permissions on {}: {e}", dir.display()))?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Create harness-specific skill symlinks for each known provider.
+/// Idempotent: skips any path where `symlink_metadata` succeeds — real
+/// directories, valid symlinks, and dangling symlinks are all left alone.
+#[cfg(unix)]
+fn ensure_skill_symlinks(root: &Path) -> Result<(), String> {
+    for skill_dir in known_skill_dirs() {
+        let parent = root.join(skill_dir);
+        fs::create_dir_all(&parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+        let link = parent.join(SKILL_NAME);
+        if link.symlink_metadata().is_ok() {
+            continue; // symlink or real path exists — skip
+        }
+        let depth = std::path::Path::new(skill_dir).components().count();
+        let prefix = "../".repeat(depth);
+        let target = format!("{prefix}{CANONICAL_SKILL_DIR}");
+        create_symlink(std::path::Path::new(&target), &link)
+            .map_err(|e| format!("symlink {} → {}: {e}", link.display(), target))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_skill_symlinks(_root: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+/// Returns the `~/.local/bin` link name for the bundled CLI.
+///
+/// Dev builds (`is_dev = true`) use `"buzz-dev"` so that a running DMG and a
+/// concurrent dev build each own a separate link and never clobber each other —
+/// the same isolation that separates `~/.buzz` (prod) from `~/.buzz-dev` (dev).
+pub fn cli_link_name(is_dev: bool) -> String {
+    crate::build_identity::cli_name(is_dev)
+}
+
+/// Ensures `~/.local/bin/buzz` (prod) or `~/.local/bin/buzz-dev` (dev) is a
+/// symlink to the bundled CLI binary.
+///
+/// The link name is split by `is_dev` so that an installed DMG and a
+/// concurrently running dev build each maintain their own symlink and never
+/// overwrite each other's target — the same isolation that separates the
+/// `~/.buzz` and `~/.buzz-dev` nests (see [`NEST_DIR_DEV`]).
+///
+/// On every boot: replaces any existing symlink unconditionally (the `buzz` /
+/// `buzz-dev` name is our namespace), creates a new one if absent, and leaves
+/// regular files alone to avoid clobbering a user-compiled binary.
+///
+/// Non-fatal: callers should ignore errors — the symlink is a convenience
+/// for human Terminal use; agents find the CLI via PATH augmentation.
+#[cfg(unix)]
+pub fn ensure_cli_symlink(exe_parent: &Path, is_dev: bool) -> Result<(), String> {
+    let buzz_bin = exe_parent.join("buzz");
+    if !buzz_bin.exists() {
+        return Ok(()); // CLI not bundled (e.g., dev builds without sidecars).
+    }
+
+    let local_bin = dirs::home_dir()
+        .ok_or("cannot resolve home directory")?
+        .join(".local")
+        .join("bin");
+    fs::create_dir_all(&local_bin).map_err(|e| format!("create {}: {e}", local_bin.display()))?;
+
+    let link = local_bin.join(cli_link_name(is_dev));
+    match link.symlink_metadata() {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            let _ = fs::remove_file(&link);
+            create_symlink(&buzz_bin, &link)
+                .map_err(|e| format!("symlink {}: {e}", link.display()))?;
+        }
+        Ok(_) => {
+            // Regular file or directory — don't clobber.
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            create_symlink(&buzz_bin, &link)
+                .map_err(|e| format!("symlink {}: {e}", link.display()))?;
+        }
+        Err(e) => {
+            return Err(format!("stat {}: {e}", link.display()));
+        }
+    }
+
+    Ok(())
+}
+
+/// No-op on non-Unix platforms — symlink management is macOS/Linux only.
+#[cfg(not(unix))]
+pub fn ensure_cli_symlink(_exe_parent: &Path, _is_dev: bool) -> Result<(), String> {
+    Ok(())
+}
+
+/// Read a version number from a file. Returns 0 if the file doesn't exist or can't be parsed.
+fn read_version_file(path: &Path) -> u32 {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// Refresh AGENTS.md static content if the template version has changed.
+///
+/// Preserves everything from the `<!-- BEGIN COLONY MANAGED` marker onward
+/// (the dynamic section managed by `upsert_managed_section`). Replaces
+/// only the static template content above the marker.
+///
+/// A file written by an earlier build opens its section with the legacy marker.
+/// It is found the same way, and [`migrate_legacy_markers`] rewrites the legacy
+/// markers of that section in place, so the text below the section is kept and
+/// the file never says the old name afterwards. A file with no section of
+/// either generation still gets the full template, as before.
+fn refresh_agents_md_if_stale(root: &Path) -> Result<(), String> {
+    let version_path = root.join(".nest-agents-version");
+    if read_version_file(&version_path) >= NEST_AGENTS_VERSION {
+        return Ok(());
+    }
+
+    let agents_md = root.join("AGENTS.md");
+    let current =
+        fs::read_to_string(&agents_md).map_err(|e| format!("read {}: {e}", agents_md.display()))?;
+
+    let new_content = match find_any_marker_at_line_start(&current, &BEGIN_MARKERS) {
+        Some((pos, _)) => {
+            // Find the start of the marker line (could be preceded by blank lines).
+            let marker_line_start = current[..pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
+            // Template content up to (but not including) the managed section,
+            // then the existing managed section from the marker onward.
+            let template_static = match AGENTS_MD.find(BEGIN_MARKER) {
+                Some(tmpl_marker_pos) => {
+                    let tmpl_line_start = AGENTS_MD[..tmpl_marker_pos]
+                        .rfind('\n')
+                        .map(|p| p + 1)
+                        .unwrap_or(0);
+                    &AGENTS_MD[..tmpl_line_start]
+                }
+                None => AGENTS_MD,
+            };
+            format!(
+                "{}{}",
+                template_static,
+                migrate_legacy_markers(&current[marker_line_start..])
+            )
+        }
+        None => {
+            // No managed section found — write full template.
+            AGENTS_MD.to_string()
+        }
+    };
+
+    // Atomic write via temp file.
+    let parent = agents_md.parent().ok_or("AGENTS.md has no parent dir")?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| format!("tempfile in {}: {e}", parent.display()))?;
+    {
+        use std::io::Write;
+        tmp.write_all(new_content.as_bytes())
+            .map_err(|e| format!("write tempfile: {e}"))?;
+    }
+    tmp.persist(&agents_md)
+        .map_err(|e| format!("persist {}: {e}", agents_md.display()))?;
+
+    fs::write(&version_path, format!("{NEST_AGENTS_VERSION}\n"))
+        .map_err(|e| format!("write {}: {e}", version_path.display()))?;
+
+    Ok(())
+}
+
+/// Refresh SKILL.md if the template version has changed.
+///
+/// SKILL.md has no user-editable sections, so it is fully overwritten on version bump.
+fn refresh_skill_md_if_stale(root: &Path) -> Result<(), String> {
+    let agents_skill_dir = root.join(CANONICAL_SKILL_DIR);
+    let version_path = agents_skill_dir.join(".skill-version");
+    if read_version_file(&version_path) >= NEST_SKILL_VERSION {
+        return Ok(());
+    }
+
+    // Ensure the canonical .agents skill directory exists.
+    fs::create_dir_all(&agents_skill_dir)
+        .map_err(|e| format!("create {}: {e}", agents_skill_dir.display()))?;
+
+    // Atomic write via temp file.
+    let skill_md = agents_skill_dir.join("SKILL.md");
+    let mut tmp = tempfile::NamedTempFile::new_in(&agents_skill_dir)
+        .map_err(|e| format!("tempfile in {}: {e}", agents_skill_dir.display()))?;
+    {
+        use std::io::Write;
+        tmp.write_all(COLONY_CLI_SKILL_MD.as_bytes())
+            .map_err(|e| format!("write tempfile: {e}"))?;
+    }
+    tmp.persist(&skill_md)
+        .map_err(|e| format!("persist {}: {e}", skill_md.display()))?;
+
+    // Create/replace the .claude/skills/colony-cli symlink.
+    #[cfg(unix)]
+    {
+        let claude_skills_dir = root.join(".claude/skills");
+        fs::create_dir_all(&claude_skills_dir)
+            .map_err(|e| format!("create {}: {e}", claude_skills_dir.display()))?;
+        let symlink_path = claude_skills_dir.join(SKILL_NAME);
+        // Remove any stale symlink before (re)creating.
+        let symlink_exists = symlink_path
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+        if symlink_exists {
+            fs::remove_file(&symlink_path)
+                .map_err(|e| format!("remove symlink {}: {e}", symlink_path.display()))?;
+        }
+        create_symlink(
+            std::path::Path::new(&format!("../../{CANONICAL_SKILL_DIR}")),
+            &symlink_path,
+        )
+        .map_err(|e| format!("symlink {}: {e}", symlink_path.display()))?;
+    }
+
+    fs::write(&version_path, format!("{NEST_SKILL_VERSION}\n"))
+        .map_err(|e| format!("write {}: {e}", version_path.display()))?;
+
+    Ok(())
+}
+
+/// Remove the generated `buzz-cli` skill entries that builds before the
+/// `colony-cli` rename left in the nest, so agents list one CLI skill and the
+/// old name never reaches them.
+///
+/// Move-only and exact: it removes only what Colony itself generated, namely the
+/// harness symlinks that point at the legacy canonical directory, the legacy
+/// `SKILL.md` and `.skill-version`, and the legacy directories once they are
+/// empty. Anything else a user or another tool put in those places stays.
+/// Failures other than "already gone" or "not empty" propagate so the next boot
+/// retries; nothing here is skipped silently.
+fn retire_legacy_skill_entries(root: &Path) -> Result<(), String> {
+    for skill_dir in known_skill_dirs() {
+        let link = root.join(skill_dir).join(LEGACY_SKILL_NAME);
+        let metadata = match link.symlink_metadata() {
+            Ok(metadata) => metadata,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("stat {}: {e}", link.display())),
+        };
+        if metadata.file_type().is_symlink() {
+            let depth = Path::new(skill_dir).components().count();
+            let generated_target = format!("{}{LEGACY_CANONICAL_SKILL_DIR}", "../".repeat(depth));
+            let points_at_legacy_skill = fs::read_link(&link)
+                .map(|target| target == Path::new(&generated_target))
+                .map_err(|e| format!("read link {}: {e}", link.display()))?;
+            if points_at_legacy_skill {
+                fs::remove_file(&link)
+                    .map_err(|e| format!("remove symlink {}: {e}", link.display()))?;
+            }
+        } else if metadata.file_type().is_dir() {
+            // Pre-`.agents` layout: a real directory holding a copy of the skill.
+            remove_generated_skill_dir(&link)?;
+        }
+    }
+    remove_generated_skill_dir(&root.join(LEGACY_CANONICAL_SKILL_DIR))
+}
+
+/// Delete the files Colony generates inside a skill directory, then the
+/// directory itself if nothing else is left in it. A symlink or anything that
+/// is not a plain directory is not ours and is left alone.
+fn remove_generated_skill_dir(dir: &Path) -> Result<(), String> {
+    match dir.symlink_metadata() {
+        Ok(metadata) if metadata.file_type().is_dir() => {}
+        Ok(_) => return Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("stat {}: {e}", dir.display())),
+    }
+    for generated in ["SKILL.md", ".skill-version"] {
+        let path = dir.join(generated);
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("remove {}: {e}", path.display())),
+        }
+    }
+    match fs::remove_dir(dir) {
+        Ok(()) => Ok(()),
+        // Something Colony did not generate lives here, so the directory stays.
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound
+                    | io::ErrorKind::DirectoryNotEmpty
+                    | io::ErrorKind::AlreadyExists
+            ) =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(format!("remove {}: {e}", dir.display())),
+    }
+}
+
+fn escape_md_cell(s: &str) -> String {
+    s.replace('|', "\\|").replace('\n', " ")
+}
+
+/// True iff the relay has archived this instance's identity. Membership is
+/// tested against the relay's `kind:13535` snapshot (lowercased hex); an empty
+/// set (relay unreachable) fails open — see [`regenerate_nest_context`].
+fn is_archived(record: &ManagedAgentRecord, archived: &HashSet<String>) -> bool {
+    archived.contains(&record.pubkey.to_ascii_lowercase())
+}
+
+pub fn render_dynamic_section(
+    personas: &[AgentDefinition],
+    agents: &[ManagedAgentRecord],
+    archived: &HashSet<String>,
+    relay_url: &str,
+) -> String {
+    // Every managed agent is eligible on every community — `relay_url` is a
+    // legacy creation-era field that `effective_agent_relay_url()` deliberately
+    // ignores, and snapshot-imported records store it empty by design. The only
+    // roster filter is identity-archive.
+    let live: Vec<&ManagedAgentRecord> = agents
+        .iter()
+        .filter(|a| !is_archived(a, archived))
+        .collect();
+    let active_agents = if live.is_empty() {
+        "## Active Agents\n\n*(No agents deployed yet. Add agents in the Colony desktop app.)*"
+            .to_string()
+    } else {
+        let mut table =
+            "## Active Agents\n\n| Name | Persona | How to address |\n|------|---------|----------------|"
+                .to_string();
+        for agent in live {
+            let role = agent
+                .persona_id
+                .as_deref()
+                .and_then(|pid| personas.iter().find(|p| p.id == pid))
+                .map(|p| p.display_name.as_str())
+                .unwrap_or("—");
+            let name = escape_md_cell(&agent.name);
+            let role_escaped = escape_md_cell(role);
+            table.push_str(&format!("\n| {name} | {role_escaped} | @{name} |"));
+        }
+        table
+    };
+
+    let relay_url = relay_url.replace(['\n', '\r'], "");
+    // The web task rules ride in the managed section, which every launch
+    // rewrites, so existing nests pick up a change without a template bump.
+    let web_task_rules = buzz_acp::WEB_TASK_RULES.trim_end();
+    format!("{active_agents}\n\n## Workspace\n- Relay: {relay_url}\n\n{web_task_rules}")
+}
+
+/// Find a marker that appears at the start of a line (position 0 or preceded by `\n`).
+fn find_marker_at_line_start(content: &str, marker: &str) -> Option<usize> {
+    let mut search_from = 0;
+    while let Some(pos) = content[search_from..].find(marker) {
+        let abs_pos = search_from + pos;
+        if abs_pos == 0 || content.as_bytes()[abs_pos - 1] == b'\n' {
+            return Some(abs_pos);
+        }
+        search_from = abs_pos + 1;
+    }
+    None
+}
+
+/// Earliest line-start occurrence of any of `markers`, as `(position, length of
+/// the marker that matched)`.
+fn find_any_marker_at_line_start(content: &str, markers: &[&str]) -> Option<(usize, usize)> {
+    markers
+        .iter()
+        .filter_map(|marker| {
+            find_marker_at_line_start(content, marker).map(|pos| (pos, marker.len()))
+        })
+        .min_by_key(|&(pos, _)| pos)
+}
+
+/// Find the first valid ordered BEGIN/END marker pair, both at line starts.
+/// Either marker may be of either generation, so a section written by an earlier
+/// build (or half rewritten by one) is found like any other.
+/// Returns `(begin_line_start, after_end)` byte offsets for slicing.
+fn find_managed_markers(content: &str) -> Option<(usize, usize)> {
+    let (begin_pos, _) = find_any_marker_at_line_start(content, &BEGIN_MARKERS)?;
+    let begin_line_start = content[..begin_pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let (end_rel, end_len) = find_any_marker_at_line_start(&content[begin_pos..], &END_MARKERS)?;
+    let end_of_end = begin_pos + end_rel + end_len;
+    let after_end = if content[end_of_end..].starts_with('\n') {
+        end_of_end + 1
+    } else {
+        end_of_end
+    };
+    Some((begin_line_start, after_end))
+}
+
+/// Remove an orphan BEGIN marker line (one with no matching END after it).
+fn strip_orphan_begin_marker(content: &str) -> String {
+    if let Some((pos, _)) = find_any_marker_at_line_start(content, &BEGIN_MARKERS) {
+        let line_start = content[..pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let line_end = content[pos..]
+            .find('\n')
+            .map(|p| pos + p + 1)
+            .unwrap_or(content.len());
+        format!(
+            "{}{}",
+            &content[..line_start],
+            content[line_end..]
+                .strip_prefix('\n')
+                .unwrap_or(&content[line_end..])
+        )
+    } else {
+        content.to_string()
+    }
+}
+
+/// Drop every line that is a legacy marker and keep all other bytes.
+///
+/// Only used when the file holds no complete section: any legacy marker line
+/// left is then unmatched, and removing the line loses none of the text around
+/// it.
+fn drop_legacy_marker_lines(content: &str) -> String {
+    content
+        .split_inclusive('\n')
+        .filter(|line| {
+            !line.starts_with(LEGACY_BEGIN_MARKER) && !line.starts_with(LEGACY_END_MARKER)
+        })
+        .collect()
+}
+
+/// Rewrite the legacy markers of the first managed section of `content` into
+/// the current ones, in place.
+///
+/// Only the opening line and the closing marker change. The section body and
+/// every other byte are kept, and markers that are already current are left
+/// alone, so content without a legacy marker comes back byte for byte.
+fn migrate_legacy_markers(content: &str) -> String {
+    let mut edits: Vec<(usize, usize, &str)> = Vec::new();
+    if let Some((begin_pos, _)) = find_any_marker_at_line_start(content, &BEGIN_MARKERS) {
+        if content[begin_pos..].starts_with(LEGACY_BEGIN_MARKER) {
+            let line_end = content[begin_pos..]
+                .find('\n')
+                .map_or(content.len(), |p| begin_pos + p);
+            edits.push((begin_pos, line_end, BEGIN_LINE));
+        }
+        if let Some((end_rel, end_len)) =
+            find_any_marker_at_line_start(&content[begin_pos..], &END_MARKERS)
+        {
+            let end_pos = begin_pos + end_rel;
+            if content[end_pos..].starts_with(LEGACY_END_MARKER) {
+                edits.push((end_pos, end_pos + end_len, END_MARKER));
+            }
+        }
+    }
+    let mut out = String::with_capacity(content.len());
+    let mut cursor = 0;
+    for (start, end, text) in edits {
+        out.push_str(&content[cursor..start]);
+        out.push_str(text);
+        cursor = end;
+    }
+    out.push_str(&content[cursor..]);
+    out
+}
+
+/// Replace the managed section of `file_path` with `new_section_content`.
+///
+/// The section is found by its current markers or the legacy ones of builds
+/// before the rename, in any pairing, and is replaced as a whole by one section
+/// with the current markers. Every byte outside the section is kept, so notes
+/// above and below it survive. A file with no complete section gets one appended
+/// once its unmatched BEGIN marker line, and any unmatched legacy marker line,
+/// is removed. Only the first section is replaced: a second complete section is
+/// left as it is. Writing is skipped when nothing changes.
+pub fn upsert_managed_section(file_path: &Path, new_section_content: &str) -> io::Result<()> {
+    let current = fs::read_to_string(file_path)?;
+
+    let replacement = format!("{BEGIN_LINE}\n{new_section_content}\n{END_MARKER}\n");
+
+    let new_content = match find_managed_markers(&current) {
+        Some((begin_line_start, after_end)) => {
+            format!(
+                "{}{}{}",
+                &current[..begin_line_start],
+                replacement,
+                &current[after_end..]
+            )
+        }
+        None => {
+            let cleaned = drop_legacy_marker_lines(&strip_orphan_begin_marker(&current));
+            format!("{}\n\n{}", cleaned.trim_end_matches('\n'), replacement)
+        }
+    };
+
+    // Skip write when content is unchanged — avoids bumping mtime on every launch.
+    if new_content == current {
+        return Ok(());
+    }
+
+    let parent = file_path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "file path has no parent directory",
+        )
+    })?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    {
+        use std::io::Write;
+        tmp.write_all(new_content.as_bytes())?;
+    }
+    tmp.persist(file_path).map_err(|e| e.error)?;
+
+    Ok(())
+}
+
+/// Serializes nest-context writes so a slow, stale regeneration cannot roll the
+/// file back over a newer one. This is an ordered, latest-request-wins gate —
+/// not a work coalescer: every superseded generation still performs its relay
+/// reads, then drops its result at commit time. Adding a true dirty-loop owner
+/// would be a larger change and is unwarranted at this user-driven trigger rate.
+///
+/// Each regeneration request claims a monotonic generation *synchronously* at
+/// request time (see [`NestRegenGate::claim`]), so the generation encodes
+/// program order: boot's regen is claimed before `apply_workspace`'s, an edit's
+/// regen before the next edit's. The claimed generation travels with the
+/// spawned task and gates its write in [`NestRegenGate::commit`]: a task drops
+/// its result once a *newer generation has been requested*, even if that newer
+/// generation later fails before it writes. Gating on the highest *requested*
+/// generation — not the highest *written* one — is what stops a slow, stale
+/// pre-edit render from publishing after a newer post-edit render was claimed
+/// and then failed during its relay work (which would otherwise leave the
+/// obsolete roster authoritative until the next unrelated trigger). Declared
+/// semantic: once a newer regeneration is requested, no older one publishes;
+/// if that newer one fails, the file simply waits for the next trigger.
+///
+/// `claim` and `commit` share one lock, so the "is this still the newest
+/// request?" compare is atomic with the synchronous file write. A bare atomic
+/// watermark checked separately from the write would let a new claim slip
+/// between an older task's eligibility check and its write; holding the lock
+/// across both closes that window (no `await` occurs while it is held).
+struct NestRegenGate {
+    /// Highest generation *requested* so far (`0` = none yet). Advanced by
+    /// [`claim`] and read by [`commit`]; guarding both under this single lock
+    /// keeps the eligibility compare atomic with the file write.
+    highest_requested: Mutex<u64>,
+}
+
+impl NestRegenGate {
+    const fn new() -> Self {
+        Self {
+            highest_requested: Mutex::new(0),
+        }
+    }
+
+    /// Claim the next generation. Call synchronously at request time so the
+    /// value reflects when the regeneration was requested, not when its task
+    /// happens to run. Advancing the shared watermark here is what lets a later
+    /// [`commit`] recognize — and drop — any older generation's stale render.
+    fn claim(&self) -> u64 {
+        let mut requested = self
+            .highest_requested
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *requested += 1;
+        *requested
+    }
+
+    /// Non-blocking [`claim`] against the *exact* lock `claim` takes. Returns
+    /// `Some(generation)` if it acquired the lock — i.e. a claim could proceed
+    /// with no contention — or `None` if the lock is already held, meaning a
+    /// concurrent claim would block on it. Because `claim` and `commit` share
+    /// `highest_requested`, calling this from inside `commit_hooked`'s
+    /// under-lock hook reports `None`: the eligibility compare and the write
+    /// are serialized against any new claim. A design that advanced the
+    /// watermark under a separate lock (or a lock-free atomic) would report
+    /// `Some` here — the regression this probe proves absent, with no reliance
+    /// on elapsed time or thread scheduling.
+    #[cfg(test)]
+    fn try_claim(&self) -> Option<u64> {
+        match self.highest_requested.try_lock() {
+            Ok(mut requested) => {
+                *requested += 1;
+                Some(*requested)
+            }
+            Err(std::sync::TryLockError::WouldBlock) => None,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                let mut requested = poisoned.into_inner();
+                *requested += 1;
+                Some(*requested)
+            }
+        }
+    }
+
+    /// Commit `content` for `generation`, dropping the write once a newer
+    /// generation has been *requested* (regardless of whether that newer
+    /// generation has written or ever will). Returns whether the file was
+    /// written. The lock spans the compare and the write so the check-and-write
+    /// is atomic and no await occurs while it is held.
+    fn commit(&self, agents_md: &Path, content: &str, generation: u64) -> io::Result<bool> {
+        self.commit_hooked(agents_md, content, generation, || {})
+    }
+
+    /// [`commit`] with a hook invoked while the lock is held, after the
+    /// eligibility compare and before the write. Production passes a no-op, so
+    /// this is exactly [`commit`]; tests pass a hook that calls [`try_claim`]
+    /// to prove no claim can land inside the compare-then-write window — the
+    /// probe reports the lock held here, whereas the flawed
+    /// separate-watermark/separate-write-lock design would report it free. The
+    /// `impl FnOnce` monomorphizes the no-op away.
+    fn commit_hooked(
+        &self,
+        agents_md: &Path,
+        content: &str,
+        generation: u64,
+        under_lock: impl FnOnce(),
+    ) -> io::Result<bool> {
+        let requested = self
+            .highest_requested
+            .lock()
+            .map_err(|_| io::Error::other("nest regen gate lock poisoned"))?;
+        if generation < *requested {
+            return Ok(false);
+        }
+        under_lock();
+        upsert_managed_section(agents_md, content)?;
+        Ok(true)
+    }
+}
+
+/// Process-wide ordered write gate for nest-context regeneration.
+static NEST_REGEN: NestRegenGate = NestRegenGate::new();
+
+pub async fn regenerate_nest_context<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    generation: u64,
+) -> Result<(), String> {
+    let nest = nest_dir().ok_or("cannot resolve home directory for nest")?;
+    let agents_md = nest.join("AGENTS.md");
+
+    if !agents_md.exists() {
+        return Ok(());
+    }
+
+    let personas = load_personas(app)?;
+    let agents = load_managed_agents(app)?;
+    let state = app.state::<AppState>();
+    // Capture the relay target once, before any network work, so this
+    // generation's rendered footer, NIP-11 signer, and snapshot query all
+    // belong to one relay even if a workspace switch changes the override
+    // between the two archive awaits below.
+    let target = capture_relay_target(&state);
+    // Identity-archived agents live only in the relay's `kind:13535` snapshot;
+    // local records all read `is_active: true`. Fails open (empty set → render
+    // everyone) so an unreachable relay can't blank the roster. The archive read
+    // uses the same captured target as the rendered relay; a later generation's
+    // task always wins the commit, so a fallback-relay boot render cannot bury a
+    // later apply_workspace render.
+    let archived: HashSet<String> = fetch_archived_pubkeys_at(&state, &target)
+        .await
+        .into_iter()
+        .collect();
+    let content = render_dynamic_section(&personas, &agents, &archived, &target.ws_url);
+    NEST_REGEN
+        .commit(&agents_md, &content, generation)
+        .map_err(|e| format!("regenerate nest context: {e}"))?;
+
+    Ok(())
+}
+
+/// Convenience wrapper: claims a regeneration generation, then regenerates on a
+/// spawned task, logging a warning on failure.
+///
+/// All call sites treat regeneration as fire-and-forget — agents run fine with
+/// a stale AGENTS.md, so we warn and continue rather than propagating the error.
+/// The generation is claimed *here*, synchronously, so it encodes call order;
+/// the spawned task carries it into [`NestRegenGate::commit`], which drops
+/// a stale render rather than letting a slow task overwrite a newer file.
+/// Archive/unarchive trigger this directly, but the regen races the relay's
+/// `kind:13535` snapshot update, so a just-archived agent may still linger for
+/// one cycle until the next regen (any agent/team edit or the next launch).
+pub fn try_regenerate_nest<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let generation = NEST_REGEN.claim();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = regenerate_nest_context(&app, generation).await {
+            eprintln!("buzz-desktop: nest context regeneration failed: {error}");
+        }
+    });
+}
+
+#[cfg(test)]
+mod brand_guard_tests;
+#[cfg(test)]
+mod marker_tests;
+#[cfg(test)]
+mod render_tests;
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+mod web_task_rules_tests;

@@ -1,0 +1,365 @@
+import {
+  deriveCommunityName,
+  normalizeRelayUrl,
+} from "@/features/communities/communityStorage";
+import { setLocalStorageItemWithRecovery } from "@/shared/lib/localStorageQuota";
+
+import { isTerminalInviteMessage } from "./inviteFailure";
+
+const STORAGE_KEY = "buzz-community-onboarding-transaction.v1";
+
+export type CommunityOnboardingSource =
+  | "first-community"
+  | "add-community"
+  | "membership-recovery"
+  | "deep-link-connect"
+  | "deep-link-join";
+
+export type CommunityOnboardingStage =
+  | "claiming"
+  | "connecting"
+  | "profile"
+  | "team-intro"
+  | "finalizing"
+  /** User postponed setup; retain its durable retry record while the app opens. */
+  | "deferred"
+  /**
+   * Backend setup is done and the app is mounting directly on the Welcome
+   * channel underneath the onboarding screen, which stays up as an opaque
+   * curtain until Welcome reports settled (or a safety timeout), then fades.
+   */
+  | "entering";
+
+export type FirstCommunityPage = "join" | "member" | "owned" | "create";
+
+export type CommunityOnboardingTransaction = {
+  id: string;
+  source: CommunityOnboardingSource;
+  /** First-run screen that launched this transaction, restored on cancel. */
+  firstCommunityPage?: FirstCommunityPage;
+  stage: CommunityOnboardingStage;
+  relayUrl: string;
+  inviteCode?: string;
+  communityName: string;
+  token?: string;
+  reposDir?: string;
+  businessCommunityId?: string;
+  sharedBusinessProfileRequired?: boolean;
+  clientChannelId?: string;
+  /**
+   * Join-policy acceptance receipt minted before the claim (bound to the
+   * invite code). Forwarded to `claimInvite` so relays with a configured
+   * join policy admit the claim.
+   */
+  policyReceipt?: string;
+  communityId?: string;
+  previousCommunityId?: string;
+  addedCommunity?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  error?: string;
+  // Deep links are persisted before machine onboarding completes. Set when
+  // the user dismisses the acknowledgment so it stays dismissed on relaunch.
+  acknowledged?: boolean;
+};
+
+export type CommunityOnboardingTransactionPatch = Partial<
+  Pick<
+    CommunityOnboardingTransaction,
+    | "stage"
+    | "relayUrl"
+    | "communityId"
+    | "previousCommunityId"
+    | "addedCommunity"
+    | "communityName"
+    | "businessCommunityId"
+    | "clientChannelId"
+    | "error"
+    | "acknowledged"
+  >
+>;
+
+export type StartCommunityOnboardingInput = {
+  source: CommunityOnboardingSource;
+  firstCommunityPage?: FirstCommunityPage;
+  relayUrl: string;
+  inviteCode?: string;
+  communityName?: string;
+  token?: string;
+  reposDir?: string;
+  businessCommunityId?: string;
+  sharedBusinessProfileRequired?: boolean;
+  clientChannelId?: string;
+  policyReceipt?: string;
+};
+
+function canonicalRelayUrl(rawRelayUrl: string) {
+  const trimmed = rawRelayUrl.trim();
+  const withScheme = /^(ws|wss):\/\//i.test(trimmed)
+    ? trimmed
+    : normalizeRelayUrl(trimmed);
+  const parsed = new URL(withScheme);
+  parsed.protocol = parsed.protocol.toLowerCase();
+  parsed.hostname = parsed.hostname.toLowerCase();
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function isTransaction(
+  value: unknown,
+): value is CommunityOnboardingTransaction {
+  if (!value || typeof value !== "object") return false;
+  const transaction = value as Partial<CommunityOnboardingTransaction>;
+  return (
+    typeof transaction.id === "string" &&
+    typeof transaction.relayUrl === "string" &&
+    typeof transaction.communityName === "string" &&
+    typeof transaction.createdAt === "string" &&
+    typeof transaction.updatedAt === "string" &&
+    [
+      "claiming",
+      "connecting",
+      "profile",
+      "team-intro",
+      "finalizing",
+      "entering",
+      "deferred",
+    ].includes(transaction.stage ?? "")
+  );
+}
+
+/**
+ * A claim that failed in a way no retry can fix must never outlive the screen
+ * that reported it: persisted, it relaunches into a dead-end "isn't ready yet"
+ * screen with no route back to the person's own workspace. Retryable failures
+ * stay durable (they keep their retry record), and so does a membership
+ * recovery, whose retry record is deliberate.
+ */
+function isUnrecoverableInviteClaim(
+  transaction: CommunityOnboardingTransaction,
+) {
+  return (
+    transaction.stage === "claiming" &&
+    transaction.source !== "membership-recovery" &&
+    Boolean(transaction.error) &&
+    isTerminalInviteMessage(transaction.error ?? "")
+  );
+}
+
+export function loadCommunityOnboardingTransaction(
+  storage: Storage = localStorage,
+): CommunityOnboardingTransaction | null {
+  try {
+    const raw = storage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isTransaction(parsed)) return null;
+    if (isUnrecoverableInviteClaim(parsed)) {
+      // Left behind by an older build: drop it so this launch is not trapped.
+      storage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCommunityOnboardingTransaction(
+  transaction: CommunityOnboardingTransaction,
+  storage: Storage = localStorage,
+): void {
+  if (isUnrecoverableInviteClaim(transaction)) {
+    // The failure stays on screen in memory only; see isUnrecoverableInviteClaim.
+    storage.removeItem(STORAGE_KEY);
+    return;
+  }
+  if (typeof localStorage !== "undefined" && storage === localStorage) {
+    setLocalStorageItemWithRecovery(STORAGE_KEY, JSON.stringify(transaction));
+  } else {
+    storage.setItem(STORAGE_KEY, JSON.stringify(transaction));
+  }
+}
+
+export function clearCommunityOnboardingTransaction(
+  storage: Storage = localStorage,
+): void {
+  storage.removeItem(STORAGE_KEY);
+}
+
+export function startCommunityOnboarding(
+  input: StartCommunityOnboardingInput,
+  storage: Storage = localStorage,
+  now = new Date(),
+): CommunityOnboardingTransaction {
+  const relayUrl = canonicalRelayUrl(input.relayUrl);
+  const existing = loadCommunityOnboardingTransaction(storage);
+  if (existing?.relayUrl === relayUrl) {
+    const updated = {
+      ...existing,
+      stage: input.inviteCode?.trim() ? "claiming" : existing.stage,
+      firstCommunityPage:
+        input.firstCommunityPage ?? existing.firstCommunityPage,
+      inviteCode: input.inviteCode?.trim() || existing.inviteCode,
+      communityName: input.communityName?.trim() || existing.communityName,
+      token: input.token?.trim() || existing.token,
+      reposDir: input.reposDir ?? existing.reposDir,
+      businessCommunityId: input.businessCommunityId,
+      sharedBusinessProfileRequired:
+        input.sharedBusinessProfileRequired ??
+        existing.sharedBusinessProfileRequired,
+      clientChannelId: input.clientChannelId,
+      policyReceipt: input.policyReceipt ?? existing.policyReceipt,
+      updatedAt: now.toISOString(),
+      error: undefined,
+      // A freshly opened link deserves fresh feedback , re-present the gate
+      // even if a previous link for this relay was already dismissed.
+      acknowledged: undefined,
+    };
+    saveCommunityOnboardingTransaction(updated, storage);
+    return updated;
+  }
+
+  const timestamp = now.toISOString();
+  const transaction: CommunityOnboardingTransaction = {
+    id: crypto.randomUUID(),
+    source: input.source,
+    firstCommunityPage: input.firstCommunityPage,
+    stage: input.inviteCode?.trim() ? "claiming" : "connecting",
+    relayUrl,
+    inviteCode: input.inviteCode?.trim() || undefined,
+    communityName: input.communityName?.trim() || deriveCommunityName(relayUrl),
+    token: input.token?.trim() || undefined,
+    reposDir: input.reposDir,
+    businessCommunityId: input.businessCommunityId,
+    sharedBusinessProfileRequired: input.sharedBusinessProfileRequired,
+    clientChannelId: input.clientChannelId,
+    policyReceipt: input.policyReceipt,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  saveCommunityOnboardingTransaction(transaction, storage);
+  return transaction;
+}
+
+export function updateCommunityOnboardingTransaction(
+  transaction: CommunityOnboardingTransaction,
+  patch: CommunityOnboardingTransactionPatch,
+  storage: Storage = localStorage,
+  now = new Date(),
+): CommunityOnboardingTransaction {
+  const updated = { ...transaction, ...patch, updatedAt: now.toISOString() };
+  saveCommunityOnboardingTransaction(updated, storage);
+  return updated;
+}
+
+export function updateCurrentCommunityOnboardingTransaction(
+  current: CommunityOnboardingTransaction | null,
+  patch: CommunityOnboardingTransactionPatch,
+  expectedId: string | undefined,
+  storage: Storage = localStorage,
+  now = new Date(),
+): CommunityOnboardingTransaction | null {
+  if (!current || (expectedId && current.id !== expectedId)) return current;
+  return updateCommunityOnboardingTransaction(current, patch, storage, now);
+}
+
+export function markCommunityOnboardingComplete(
+  pubkey: string,
+  relayUrl: string,
+  storage: Storage = localStorage,
+): void {
+  storage.setItem(
+    `buzz-community-onboarding-complete.v1:${encodeURIComponent(relayUrl)}:${pubkey}`,
+    "true",
+  );
+  // The legacy gate is identity-scoped. Marking it here prevents the old profile
+  // flow from reopening after the first community transaction completes.
+  storage.setItem(`buzz-onboarding-complete.v1:${pubkey}`, "true");
+}
+
+import * as React from "react";
+
+type CommunityOnboardingContextValue = {
+  transaction: CommunityOnboardingTransaction | null;
+  start: (input: StartCommunityOnboardingInput) => boolean;
+  update: (
+    patch: CommunityOnboardingTransactionPatch,
+    expectedId?: string,
+  ) => void;
+  clear: () => void;
+};
+
+const CommunityOnboardingContext =
+  React.createContext<CommunityOnboardingContextValue | null>(null);
+
+export function CommunityOnboardingProvider({
+  children,
+  enabled = true,
+}: {
+  children: React.ReactNode;
+  enabled?: boolean;
+}) {
+  const [transaction, setTransaction] = React.useState(() =>
+    enabled ? loadCommunityOnboardingTransaction() : null,
+  );
+  const start = React.useCallback(
+    (input: StartCommunityOnboardingInput) => {
+      if (!enabled) return false;
+      if (
+        transaction &&
+        input.source !== "membership-recovery" &&
+        canonicalRelayUrl(input.relayUrl) !== transaction.relayUrl
+      ) {
+        return false;
+      }
+      setTransaction(startCommunityOnboarding(input));
+      return true;
+    },
+    [enabled, transaction],
+  );
+  // Updates run as state updaters, i.e. at render time. One queued before a
+  // clear would otherwise write the cleared transaction back to storage.
+  const clearedIds = React.useRef(new Set<string>());
+  const currentId = React.useRef<string | null>(null);
+  currentId.current = transaction?.id ?? null;
+  const update = React.useCallback(
+    (patch: CommunityOnboardingTransactionPatch, expectedId?: string) => {
+      if (!enabled) return;
+      setTransaction((current) =>
+        current && clearedIds.current.has(current.id)
+          ? null
+          : updateCurrentCommunityOnboardingTransaction(
+              current,
+              patch,
+              expectedId,
+            ),
+      );
+    },
+    [enabled],
+  );
+  const clear = React.useCallback(() => {
+    if (!enabled) return;
+    if (currentId.current) clearedIds.current.add(currentId.current);
+    clearCommunityOnboardingTransaction();
+    setTransaction(null);
+  }, [enabled]);
+  const value = React.useMemo(
+    () => ({ transaction, start, update, clear }),
+    [clear, start, transaction, update],
+  );
+  return (
+    <CommunityOnboardingContext.Provider value={value}>
+      {children}
+    </CommunityOnboardingContext.Provider>
+  );
+}
+
+export function useCommunityOnboarding() {
+  const context = React.useContext(CommunityOnboardingContext);
+  if (!context)
+    throw new Error(
+      "useCommunityOnboarding must be used within CommunityOnboardingProvider",
+    );
+  return context;
+}

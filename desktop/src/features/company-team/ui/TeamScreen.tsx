@@ -1,0 +1,433 @@
+import * as React from "react";
+
+import { useAppNavigation } from "@/app/navigation/useAppNavigation";
+import { useIdentityQuery } from "@/shared/api/hooks";
+import { useUsersBatchQuery } from "@/features/profile/hooks";
+import { truncateNpub } from "@/shared/lib/pubkey";
+import { EmployeeAvatar } from "./EmployeeAvatar";
+import { useEmployeeRuntime } from "../useEmployeeRuntime";
+import { usePersonasQuery } from "@/features/agents/hooks";
+import { Badge } from "@/shared/ui/badge";
+import { TeamPage, TeamPageTitle } from "./TeamPage";
+import { Button } from "@/shared/ui/button";
+import { useCompanyTeamQuery } from "../teamRelay";
+import { buildTeamTreeRows, type TeamMember } from "../teamModels";
+import { CanaryTeamRoster } from "./CanaryTeamRoster";
+
+type TeamScreenProps = { view: "everyone" | "org" };
+
+function displayName(
+  member: TeamMember,
+  profiles: Record<string, { displayName: string | null }>,
+) {
+  return (
+    profiles[member.pubkey]?.displayName?.trim() ||
+    member.fallbackName?.trim() ||
+    truncateNpub(member.pubkey)
+  );
+}
+
+function memberKindLabel(member: TeamMember) {
+  return member.kind === "employee" ? "Employee" : "Human";
+}
+
+function memberTitle(member: TeamMember) {
+  return (
+    member.position?.head.title.trim() ||
+    (member.role === "owner" ? "Founder" : "")
+  );
+}
+
+function memberStatus(member: TeamMember) {
+  return (
+    member.position?.head.status ??
+    (member.kind === "human" ? "active" : "Needs attention")
+  );
+}
+
+function TeamTabs({ view }: TeamScreenProps) {
+  const { goTeam, goTeamOrg } = useAppNavigation();
+  return (
+    <div
+      aria-label="Team views"
+      className="mb-[1.375rem] flex gap-6 border-b border-border"
+      role="tablist"
+    >
+      <button
+        aria-selected={view === "everyone"}
+        className={`-mb-px border-b-2 px-0 py-2.5 text-xs ${view === "everyone" ? "border-primary font-semibold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+        onClick={() => void goTeam()}
+        role="tab"
+        type="button"
+      >
+        Everyone
+      </button>
+      <button
+        aria-selected={view === "org"}
+        className={`-mb-px border-b-2 px-0 py-2.5 text-xs ${view === "org" ? "border-primary font-semibold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+        onClick={() => void goTeamOrg()}
+        role="tab"
+        type="button"
+      >
+        Reporting lines
+      </button>
+    </div>
+  );
+}
+
+function TeamMemberRow({
+  member,
+  name,
+  managerName,
+  depth = 0,
+  tree = false,
+  tabIndex,
+  onTreeFocus,
+  avatarUrl,
+  definitionAvatar,
+}: {
+  member: TeamMember;
+  name: string;
+  managerName: string | null;
+  depth?: number;
+  tree?: boolean;
+  tabIndex?: number;
+  onTreeFocus?: (pubkey: string) => void;
+  avatarUrl?: string | null;
+  definitionAvatar?: string | null;
+}) {
+  const { goTeamMember } = useAppNavigation();
+  const title = memberTitle(member);
+  const runtime = useEmployeeRuntime(member);
+  const status =
+    member.kind === "employee" ? runtime.label : memberStatus(member);
+  const reason = member.position?.head.reason;
+  const managerDescription = managerName ? `, Reports to ${managerName}` : "";
+  const reasonDescription = reason ? `, Reason: ${reason}` : "";
+  const accessibleName = `${name}, ${title || "No title"}, ${memberKindLabel(member)}, ${status}${managerDescription}${reasonDescription}`;
+  const rowContents = (
+    <>
+      <span className="flex min-w-0 items-center gap-[0.9375rem]">
+        {tree && depth > 0 ? (
+          <span
+            aria-hidden="true"
+            className="absolute ml-[-1.5rem] h-full border-l border-border"
+          />
+        ) : null}
+        {member.kind === "employee" ? (
+          <EmployeeAvatar
+            name={name}
+            profile={avatarUrl}
+            instance={member.managedAgent?.avatarUrl}
+            definition={definitionAvatar}
+            personaId={member.managedAgent?.personaId}
+            className="size-[2.125rem] shrink-0"
+            testId={`team-avatar-${member.pubkey}`}
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            className={`grid size-[2.125rem] shrink-0 place-items-center rounded-[0.625rem] text-2xs font-semibold text-primary bg-accent`}
+          >
+            {name
+              .split(/\s+/)
+              .filter(Boolean)
+              .slice(0, 2)
+              .map((part) => part[0])
+              .join("")
+              .toUpperCase()}
+          </span>
+        )}
+        <span className="min-w-0">
+          <span className="block truncate text-compact font-semibold text-foreground">
+            {name}
+          </span>
+          <span className="block truncate text-2xs text-muted-foreground">
+            {title ? `${title} · ` : ""}
+            {memberKindLabel(member)}
+          </span>
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-10">
+        {managerName ? (
+          <span className="hidden text-xs text-muted-foreground sm:inline">
+            Reports to {managerName}
+          </span>
+        ) : member.role === "owner" ? (
+          <span className="hidden text-xs text-muted-foreground sm:inline">
+            Company owner
+          </span>
+        ) : null}
+        <Badge
+          className={`rounded-[0.3125rem] border-0 px-2 py-1 text-badge font-semibold normal-case leading-relaxed tracking-normal ${status === "active" || status === "Ready" || status === "Working" ? "bg-colony-success/10 text-colony-success" : (status === "Offline" || status === "Loading") ? "bg-muted text-muted-foreground" : "bg-accent text-primary"}`}
+          variant="secondary"
+        >
+          {status}
+        </Badge>
+      </span>
+    </>
+  );
+  const className =
+    "group relative flex min-h-[4.5625rem] w-full items-center justify-between gap-4 border-b border-border px-2 py-[1.0625rem] text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const onClick = () => void goTeamMember(member.pubkey);
+  if (tree) {
+    return (
+      <button
+        aria-label={accessibleName}
+        aria-level={depth + 1}
+        className={className}
+        data-testid={`company-team-member-${member.pubkey}`}
+        onClick={onClick}
+        onFocus={() => onTreeFocus?.(member.pubkey)}
+        role="treeitem"
+        style={{ paddingLeft: `${depth * 2.75 + 0.5}rem` }}
+        tabIndex={tabIndex}
+        type="button"
+      >
+        {rowContents}
+      </button>
+    );
+  }
+  return (
+    <button
+      aria-label={accessibleName}
+      className={className}
+      data-testid={`company-team-member-${member.pubkey}`}
+      onClick={onClick}
+      type="button"
+    >
+      {rowContents}
+    </button>
+  );
+}
+
+export function TeamScreen({ view }: TeamScreenProps) {
+  const teamQuery = useCompanyTeamQuery();
+  const identityQuery = useIdentityQuery();
+  const personasQuery = usePersonasQuery();
+  const { goHireRoles } = useAppNavigation();
+  const treeRef = React.useRef<HTMLDivElement>(null);
+  const [focusedTreeMember, setFocusedTreeMember] = React.useState<
+    string | null
+  >(null);
+  const members = teamQuery.data?.members ?? [];
+  const memberPubkeys = React.useMemo(
+    () => members.map((member) => member.pubkey),
+    [members],
+  );
+  const profilesQuery = useUsersBatchQuery(memberPubkeys, {
+    enabled: memberPubkeys.length > 0,
+  });
+  const profiles = profilesQuery.data?.profiles ?? {};
+  const role = teamQuery.data?.relayMembers.find(
+    (member) =>
+      member.pubkey.toLowerCase() === identityQuery.data?.pubkey.toLowerCase(),
+  )?.role;
+  const canHire = role === "owner" || role === "admin";
+  let treeRows: ReturnType<typeof buildTeamTreeRows> = [];
+  let treeError: string | null = null;
+  if (view === "org" && members.length > 0) {
+    try {
+      treeRows = buildTeamTreeRows(members);
+    } catch {
+      treeError = "The reporting lines could not be displayed.";
+    }
+  }
+
+  if (
+    teamQuery.isLoading ||
+    teamQuery.isError ||
+    !teamQuery.data?.membershipSnapshotFound
+  ) {
+    return (
+      <TeamPage
+        title="Team"
+        testId="company-team-screen"
+        canary={view === "everyone"}
+      >
+        <TeamPageTitle>
+          {view === "everyone" ? "Your team." : "Team"}
+        </TeamPageTitle>
+        {teamQuery.isLoading ? (
+          <p aria-live="polite" className="mt-6 text-sm text-muted-foreground">
+            Loading Team
+          </p>
+        ) : teamQuery.isError ? (
+          <div role="alert" className="mt-6">
+            <p className="text-sm">This information could not load</p>
+            <Button
+              className="mt-3"
+              variant="outline"
+              onClick={() => void teamQuery.refetch()}
+            >
+              Try again
+            </Button>
+          </div>
+        ) : (
+          <p role="status" className="mt-6 text-sm text-muted-foreground">
+            Team membership is unavailable for this community.
+          </p>
+        )}
+      </TeamPage>
+    );
+  }
+
+  const memberByPubkey = new Map(
+    members.map((member) => [member.pubkey, member]),
+  );
+  const managerName = (member: TeamMember) => {
+    const managerPubkey = member.position?.head.managerPubkey;
+    const manager = managerPubkey ? memberByPubkey.get(managerPubkey) : null;
+    return manager ? displayName(manager, profiles) : null;
+  };
+
+  const handleTreeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (
+      ![
+        "ArrowDown",
+        "ArrowUp",
+        "ArrowLeft",
+        "ArrowRight",
+        "Home",
+        "End",
+      ].includes(event.key)
+    ) {
+      return;
+    }
+    const items = Array.from(
+      treeRef.current?.querySelectorAll<HTMLButtonElement>(
+        "[role='treeitem']",
+      ) ?? [],
+    );
+    const currentIndex = items.indexOf(event.target as HTMLButtonElement);
+    if (currentIndex < 0 || items.length === 0) return;
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowDown")
+      nextIndex = Math.min(items.length - 1, currentIndex + 1);
+    if (event.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - 1);
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = items.length - 1;
+    if (event.key === "ArrowRight") {
+      const currentLevel = Number(
+        items[currentIndex]?.getAttribute("aria-level") ?? 1,
+      );
+      const nextLevel = Number(
+        items[currentIndex + 1]?.getAttribute("aria-level") ?? 0,
+      );
+      if (nextLevel === currentLevel + 1) nextIndex = currentIndex + 1;
+    }
+    if (event.key === "ArrowLeft") {
+      const currentLevel = Number(
+        items[currentIndex]?.getAttribute("aria-level") ?? 1,
+      );
+      for (let index = currentIndex - 1; index >= 0; index -= 1) {
+        const level = Number(items[index]?.getAttribute("aria-level") ?? 1);
+        if (level < currentLevel) {
+          nextIndex = index;
+          break;
+        }
+      }
+    }
+    event.preventDefault();
+    items[nextIndex]?.focus();
+  };
+
+  if (view === "everyone") {
+    return (
+      <TeamPage title="Team" testId="company-team-screen" canary>
+        <CanaryTeamRoster
+          members={members}
+          profiles={profiles}
+          canHire={canHire}
+        />
+      </TeamPage>
+    );
+  }
+
+  return (
+    <TeamPage title="Team" testId="company-team-screen">
+      <div className="mb-[1.875rem] mt-2 flex items-center justify-between gap-5">
+        <TeamPageTitle>Team</TeamPageTitle>
+        {canHire ? (
+          <Button
+            className="rounded-[0.4375rem] h-auto min-h-10 bg-colony-info px-[0.9375rem] py-[0.6875rem] text-xs shadow-none"
+            onClick={() => void goHireRoles()}
+            type="button"
+          >
+            Hire employee
+          </Button>
+        ) : null}
+      </div>
+      <TeamTabs view={view} />
+      {treeError ? (
+        <p className="py-8 text-center text-sm text-destructive" role="alert">
+          {treeError}
+        </p>
+      ) : view === "org" ? (
+        <div
+          aria-label="Reporting lines"
+          className="relative"
+          onKeyDown={handleTreeKeyDown}
+          ref={treeRef}
+          role="tree"
+        >
+          {treeRows.map(({ member, depth }, index) => (
+            <TeamMemberRow
+              avatarUrl={profiles[member.pubkey]?.avatarUrl}
+              definitionAvatar={
+                personasQuery.data?.find(
+                  (persona) => persona.id === member.managedAgent?.personaId,
+                )?.avatarUrl
+              }
+              depth={depth}
+              key={member.pubkey}
+              managerName={managerName(member)}
+              member={member}
+              name={displayName(member, profiles)}
+              onTreeFocus={setFocusedTreeMember}
+              tabIndex={
+                focusedTreeMember
+                  ? focusedTreeMember === member.pubkey
+                    ? 0
+                    : -1
+                  : index === 0
+                    ? 0
+                    : -1
+              }
+              tree
+            />
+          ))}
+        </div>
+      ) : (
+        <div data-testid="company-team-list">
+          {members.map((member) => (
+            <TeamMemberRow
+              avatarUrl={profiles[member.pubkey]?.avatarUrl}
+              definitionAvatar={
+                personasQuery.data?.find(
+                  (persona) => persona.id === member.managedAgent?.personaId,
+                )?.avatarUrl
+              }
+              key={member.pubkey}
+              managerName={managerName(member)}
+              member={member}
+              name={displayName(member, profiles)}
+            />
+          ))}
+        </div>
+      )}
+      {members.length === 0 ? (
+        <p
+          className="py-8 text-center text-sm text-muted-foreground"
+          role="status"
+        >
+          No team members found.
+        </p>
+      ) : null}
+      <p className="mt-[1.5625rem] border-t border-border pt-[0.9375rem] text-2xs text-muted-foreground">
+        Humans and employees can report to either kind of teammate. Reporting
+        lines do not grant spending or credential authority.
+      </p>
+    </TeamPage>
+  );
+}

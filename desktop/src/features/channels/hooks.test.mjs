@@ -1,0 +1,474 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  MutationObserver,
+  QueryClient,
+  QueryObserver,
+} from "@tanstack/react-query";
+
+import {
+  applyLastMessages,
+  canFetchChannelsForIdentity,
+  channelsQueryKey,
+  reconcileRefreshedCachedChannel,
+  refreshChannelsQuery,
+  requireFullChannelList,
+  setCanvasMutationOptions,
+  sortChannels,
+  upsertCachedChannel,
+  upsertCachedChannelMember,
+} from "./hooks.ts";
+
+function makeChannel(
+  id,
+  name,
+  channelType = "stream",
+  { participantPubkeys = [], participants = [], lastMessageAt = null } = {},
+) {
+  return {
+    id,
+    name,
+    channelType,
+    visibility: channelType === "dm" ? "private" : "open",
+    description: "",
+    topic: null,
+    purpose: null,
+    memberCount: participantPubkeys.length,
+    memberPubkeys: [...participantPubkeys],
+    lastMessageAt,
+    archivedAt: null,
+    participants,
+    participantPubkeys,
+    isMember: true,
+    ttlSeconds: null,
+    ttlDeadline: null,
+  };
+}
+
+test("sortChannels preserves authored order within channel types", () => {
+  const channels = [
+    makeChannel("forum-z", "Zeta forum", "forum"),
+    makeChannel("olive", "The Olive House"),
+    makeChannel("cedar", "Cedar Café"),
+    makeChannel("dm", "Lerato and Aya", "dm"),
+    makeChannel("northline", "Northline Interiors"),
+    makeChannel("forum-a", "Alpha forum", "forum"),
+  ];
+
+  assert.deepEqual(
+    sortChannels(channels).map((channel) => channel.id),
+    ["olive", "cedar", "northline", "forum-z", "forum-a", "dm"],
+  );
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function makeRefreshHarness({ cachedHash = "hash-1" } = {}) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const start = makeChannel("general", "General", "stream", {
+    lastMessageAt: "2026-01-01T00:00:00.000Z",
+  });
+  queryClient.setQueryData(channelsQueryKey, [start]);
+  const request = deferred();
+  const calls = [];
+  const fetchChannels = (knownHash) => {
+    calls.push(knownHash);
+    return request.promise;
+  };
+  const initialSnapshotPair = cachedHash
+    ? { channels: [start], hash: cachedHash }
+    : null;
+
+  return {
+    calls,
+    fetchChannels,
+    initialSnapshotPair,
+    queryClient,
+    request,
+    start,
+  };
+}
+
+function setDisplayedRecency(queryClient, lastMessageAt) {
+  queryClient.setQueryData(channelsQueryKey, (channels) =>
+    channels.map((channel) =>
+      channel.id === "general" ? { ...channel, lastMessageAt } : channel,
+    ),
+  );
+}
+
+function refreshWithHarness(harness, fetchChannels = harness.fetchChannels) {
+  return harness.queryClient.fetchQuery({
+    queryKey: channelsQueryKey,
+    queryFn: () =>
+      refreshChannelsQuery({
+        queryClient: harness.queryClient,
+        initialSnapshotPair: harness.initialSnapshotPair,
+        relayUrl: null,
+        ownerPubkey: null,
+        fetchChannels,
+      }),
+  });
+}
+
+const T1 = "2026-01-01T00:01:00.000Z";
+const T2 = "2026-01-01T00:02:00.000Z";
+
+test("refreshChannelsQuery preserves a live update through matching not-modified settlement", async () => {
+  const harness = makeRefreshHarness();
+  const refresh = refreshWithHarness(harness);
+
+  assert.deepEqual(harness.calls, ["hash-1"]);
+  setDisplayedRecency(harness.queryClient, T2);
+  harness.request.resolve({
+    hash: "hash-1",
+    channels: null,
+    lastMessages: { general: T1 },
+  });
+
+  const result = await refresh;
+  assert.equal(result[0].lastMessageAt, T2);
+  assert.equal(
+    harness.queryClient.getQueryData(channelsQueryKey)[0].lastMessageAt,
+    T2,
+  );
+});
+
+test("refreshChannelsQuery preserves a live update through authoritative full-list settlement", async () => {
+  const harness = makeRefreshHarness({ cachedHash: null });
+  const refresh = refreshWithHarness(harness);
+
+  assert.deepEqual(harness.calls, [null]);
+  setDisplayedRecency(harness.queryClient, T2);
+  harness.request.resolve({
+    hash: "hash-2",
+    channels: [makeChannel("general", "General")],
+    lastMessages: { general: T1 },
+  });
+
+  const result = await refresh;
+  assert.equal(result[0].lastMessageAt, T2);
+  assert.equal(
+    harness.queryClient.getQueryData(channelsQueryKey)[0].lastMessageAt,
+    T2,
+  );
+});
+
+test("refreshChannelsQuery preserves a live update through mismatched not-modified retry", async () => {
+  const harness = makeRefreshHarness();
+  const retry = deferred();
+  const fetchChannels = (knownHash) => {
+    harness.calls.push(knownHash);
+    return harness.calls.length === 1
+      ? Promise.resolve({
+          hash: "mismatched-hash",
+          channels: null,
+          lastMessages: {},
+        })
+      : retry.promise;
+  };
+  const refresh = refreshWithHarness(harness, fetchChannels);
+
+  await Promise.resolve();
+  assert.deepEqual(harness.calls, ["hash-1", null]);
+  setDisplayedRecency(harness.queryClient, T2);
+  retry.resolve({
+    hash: "hash-2",
+    channels: [makeChannel("general", "General")],
+    lastMessages: { general: T1 },
+  });
+
+  const result = await refresh;
+  assert.equal(result[0].lastMessageAt, T2);
+  assert.equal(
+    harness.queryClient.getQueryData(channelsQueryKey)[0].lastMessageAt,
+    T2,
+  );
+});
+
+test("refreshChannelsQuery clears unchanged recency on authoritative absence", async () => {
+  const harness = makeRefreshHarness();
+  const refresh = refreshWithHarness(harness);
+
+  harness.request.resolve({
+    hash: "hash-1",
+    channels: null,
+    lastMessages: {},
+  });
+
+  const result = await refresh;
+  assert.equal(result[0].lastMessageAt, null);
+});
+
+test("upsertCachedChannel_reseedsOpenedDmAfterStaleRefetch", () => {
+  const staleChannels = [makeChannel("general", "General")];
+  const openedDm = makeChannel("new-dm", "Alice", "dm");
+
+  const repairedChannels = upsertCachedChannel(staleChannels, openedDm);
+
+  assert.strictEqual(
+    repairedChannels.find((channel) => channel.id === openedDm.id),
+    openedDm,
+    "the route must be able to resolve the exact relay-returned DM",
+  );
+});
+
+test("upsertCachedChannel_replacesExistingChannelWithoutDuplicates", () => {
+  const staleDm = makeChannel("new-dm", "Old name", "dm");
+  const openedDm = makeChannel("new-dm", "Alice", "dm");
+
+  const repairedChannels = upsertCachedChannel([staleDm], openedDm);
+
+  assert.deepEqual(repairedChannels, [openedDm]);
+});
+
+test("upsertCachedChannelMember_doesNotDecorateImmutableDmSource", () => {
+  const charliePubkey = "charlie-pubkey";
+  const ownerPubkey = "owner-pubkey";
+  const fizzPubkey = "fizz-pubkey";
+  const openedDm = makeChannel("new-dm", "DM", "dm", {
+    participantPubkeys: [charliePubkey, ownerPubkey],
+    participants: ["charlie", "owner"],
+  });
+
+  const channels = upsertCachedChannelMember([openedDm], openedDm.id, {
+    membershipAdded: true,
+    name: "Fizz",
+    pubkey: fizzPubkey,
+  });
+  assert.deepEqual(channels, [openedDm]);
+});
+
+test("upsertCachedChannelMember_recordsStreamMemberBeforeRefetch", () => {
+  const fizzPubkey = "fizz-pubkey";
+  const channel = makeChannel("general", "General");
+
+  const channels = upsertCachedChannelMember([channel], channel.id, {
+    membershipAdded: true,
+    name: "Fizz",
+    pubkey: fizzPubkey,
+  });
+
+  assert.deepEqual(channels?.[0].memberPubkeys, [fizzPubkey]);
+  assert.equal(channels?.[0].memberCount, 1);
+});
+
+test("reconcileRefreshedCachedChannel_restoresOpenedDmAfterStaleRefresh", () => {
+  const charliePubkey = "charlie-pubkey";
+  const ownerPubkey = "owner-pubkey";
+  const fizzPubkey = "fizz-pubkey";
+  const openedDm = makeChannel("new-dm", "DM", "dm", {
+    participantPubkeys: [charliePubkey, ownerPubkey],
+    participants: ["charlie", "owner"],
+  });
+  const expandedDm = makeChannel("expanded-dm", "Group DM", "dm", {
+    participantPubkeys: [charliePubkey, ownerPubkey, fizzPubkey],
+    participants: ["charlie", "owner", "Fizz"],
+  });
+
+  const reconciled = reconcileRefreshedCachedChannel([openedDm], expandedDm);
+
+  assert.deepEqual(reconciled[1].participantPubkeys, [
+    charliePubkey,
+    ownerPubkey,
+    fizzPubkey,
+  ]);
+  assert.deepEqual(reconciled[0], openedDm);
+});
+
+test("identity failure enables a hashless live channel fetch", () => {
+  assert.equal(canFetchChannelsForIdentity(null, false), false);
+  assert.equal(canFetchChannelsForIdentity("owner-pubkey", false), true);
+  assert.equal(canFetchChannelsForIdentity(null, true), true);
+});
+
+test("hashless retry rejects null channels before persistence", () => {
+  const channels = [makeChannel("general", "General")];
+  assert.strictEqual(requireFullChannelList(channels), channels);
+  assert.throws(
+    () => requireFullChannelList(null),
+    /no list for a hashless request/,
+  );
+});
+
+// ── applyLastMessages ─────────────────────────────────────────────────────────
+
+test("applyLastMessages_preservesReferenceWhenTimestampUnchanged", () => {
+  const channel = makeChannel("general", "General");
+  channel.lastMessageAt = "2026-01-01T00:00:00Z";
+
+  const result = applyLastMessages([channel], {
+    general: "2026-01-01T00:00:00Z",
+  });
+
+  // Must be the same object reference — structural sharing avoids re-renders.
+  assert.strictEqual(
+    result[0],
+    channel,
+    "reference must be preserved when lastMessageAt is unchanged",
+  );
+});
+
+test("applyLastMessages_createsNewObjectWhenTimestampChanges", () => {
+  const channel = makeChannel("general", "General");
+  channel.lastMessageAt = "2026-01-01T00:00:00Z";
+
+  const result = applyLastMessages([channel], {
+    general: "2026-06-15T12:00:00Z",
+  });
+
+  assert.notStrictEqual(
+    result[0],
+    channel,
+    "must create a new object when timestamp changes",
+  );
+  assert.equal(result[0].lastMessageAt, "2026-06-15T12:00:00Z");
+});
+
+test("applyLastMessages_setsNullWhenChannelAbsentFromMap", () => {
+  const channel = makeChannel("general", "General");
+  channel.lastMessageAt = "2026-01-01T00:00:00Z";
+
+  const result = applyLastMessages([channel], {});
+
+  assert.notStrictEqual(result[0], channel);
+  assert.equal(result[0].lastMessageAt, null);
+});
+
+test("applyLastMessages_preservesReferenceWhenBothNull", () => {
+  const channel = makeChannel("general", "General");
+  // lastMessageAt defaults to null in makeChannel
+
+  const result = applyLastMessages([channel], {});
+
+  assert.strictEqual(result[0], channel, "null→null must preserve reference");
+});
+
+test("reconcileRefreshedCachedChannel_preservesRefreshedDmRecency", () => {
+  const charliePubkey = "charlie-pubkey";
+  const ownerPubkey = "owner-pubkey";
+  const openedDm = makeChannel("new-dm", "DM", "dm", {
+    participantPubkeys: [charliePubkey, ownerPubkey],
+    participants: ["charlie", "owner"],
+  });
+  const refreshedDm = {
+    ...openedDm,
+    lastMessageAt: "2026-07-14T11:21:26Z",
+    name: "Group DM (3)",
+  };
+
+  const reconciled = reconcileRefreshedCachedChannel([refreshedDm], openedDm);
+
+  assert.equal(reconciled[0].lastMessageAt, refreshedDm.lastMessageAt);
+  assert.equal(reconciled[0].name, refreshedDm.name);
+  assert.deepEqual(reconciled[0].participantPubkeys, [
+    charliePubkey,
+    ownerPubkey,
+  ]);
+});
+
+test("invalidateChannelMembersRosters dedupes and targets member keys", async () => {
+  const { invalidateChannelMembersRosters } = await import(
+    "./rosterFreshness.ts"
+  );
+  const invalidated = [];
+  const queryClient = {
+    invalidateQueries: async ({ queryKey }) => {
+      invalidated.push(queryKey);
+    },
+  };
+
+  await invalidateChannelMembersRosters(queryClient, ["ch-a", "ch-b", "ch-a"]);
+
+  assert.deepEqual(invalidated, [
+    ["channels", "ch-a", "members"],
+    ["channels", "ch-b", "members"],
+  ]);
+});
+
+// ── Canvas save ─────────────────────────────────────────────────────────────
+
+const CANVAS_KEY = ["channel-canvas", "ch-canvas"];
+const OLD_CANVAS = { content: "# Old note", updatedAt: 100, author: "aa" };
+const savedOk = async () => ({ ok: true, eventId: "e1" });
+
+function saveCanvas(queryClient, content, save = savedOk) {
+  const observer = new MutationObserver(
+    queryClient,
+    setCanvasMutationOptions(queryClient, "ch-canvas", save),
+  );
+  return observer.mutate(content);
+}
+
+test("a saved canvas is in the cache when the save resolves (editor closes onto it)", async () => {
+  const queryClient = new QueryClient();
+  queryClient.setQueryData(CANVAS_KEY, OLD_CANVAS);
+
+  await saveCanvas(queryClient, "# Gate note wk-1");
+
+  assert.equal(
+    queryClient.getQueryData(CANVAS_KEY).content,
+    "# Gate note wk-1",
+  );
+});
+
+test("a canvas fetch in flight before the save cannot land the old canvas over it", async () => {
+  const queryClient = new QueryClient();
+  queryClient.setQueryData(CANVAS_KEY, OLD_CANVAS);
+  let releaseStaleFetch;
+  const staleFetch = queryClient
+    .fetchQuery({
+      queryKey: CANVAS_KEY,
+      queryFn: () =>
+        new Promise((resolve) => {
+          releaseStaleFetch = () => resolve(OLD_CANVAS);
+        }),
+    })
+    .catch(() => undefined);
+
+  await saveCanvas(queryClient, "# Gate note wk-2");
+  releaseStaleFetch();
+  await staleFetch;
+
+  assert.equal(
+    queryClient.getQueryData(CANVAS_KEY).content,
+    "# Gate note wk-2",
+  );
+});
+
+test("a canvas save still refetches the relay copy for an open canvas", async () => {
+  const queryClient = new QueryClient();
+  const relayCopy = {
+    content: "# Gate note wk-3",
+    updatedAt: 200,
+    author: "bb",
+  };
+  let fetches = 0;
+  const observer = new QueryObserver(queryClient, {
+    queryKey: CANVAS_KEY,
+    queryFn: async () => {
+      fetches += 1;
+      return fetches === 1 ? OLD_CANVAS : relayCopy;
+    },
+  });
+  const unsubscribe = observer.subscribe(() => {});
+  await observer.refetch();
+
+  await saveCanvas(queryClient, "# Gate note wk-3");
+  while (queryClient.isFetching({ queryKey: CANVAS_KEY }) > 0) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  assert.equal(fetches, 2);
+  assert.deepEqual(queryClient.getQueryData(CANVAS_KEY), relayCopy);
+  unsubscribe();
+});

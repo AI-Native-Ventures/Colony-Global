@@ -1,0 +1,341 @@
+-- Reconcile schema details that pgschema does not preserve.
+--
+-- pgschema reconciles DDL, but it does not execute seed DML or preserve every
+-- table storage parameter from schema/schema.sql. It also currently emits
+-- partition children as standalone CREATE TABLE statements. Every pgschema
+-- apply caller must run this idempotent script so fresh bootstraps converge on
+-- the same live database contract as migration-managed databases.
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'events'::regclass
+          AND inhrelid = 'events_p_past'::regclass
+    ) THEN
+        -- pgschema may copy parent triggers onto standalone children. Drop
+        -- those copies before ATTACH; PostgreSQL recreates inherited parent
+        -- triggers while attaching and rejects same-named child triggers.
+        DROP TRIGGER IF EXISTS events_enqueue_push_match ON events_p_past;
+        DROP TRIGGER IF EXISTS events_refresh_channel_ttl ON events_p_past;
+        DROP TRIGGER IF EXISTS events_created_at_floor ON events_p_past;
+        DROP TRIGGER IF EXISTS community_write_fence_events ON events_p_past;
+        DROP TRIGGER IF EXISTS trg_events_guard_channel_roster_snapshot ON events_p_past;
+        ALTER TABLE events ATTACH PARTITION events_p_past
+            FOR VALUES FROM (MINVALUE) TO ('2026-01-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'events'::regclass
+          AND inhrelid = 'events_p2026_01'::regclass
+    ) THEN
+        DROP TRIGGER IF EXISTS events_enqueue_push_match ON events_p2026_01;
+        DROP TRIGGER IF EXISTS events_refresh_channel_ttl ON events_p2026_01;
+        DROP TRIGGER IF EXISTS events_created_at_floor ON events_p2026_01;
+        DROP TRIGGER IF EXISTS community_write_fence_events ON events_p2026_01;
+        DROP TRIGGER IF EXISTS trg_events_guard_channel_roster_snapshot ON events_p2026_01;
+        ALTER TABLE events ATTACH PARTITION events_p2026_01
+            FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'events'::regclass
+          AND inhrelid = 'events_p2026_02'::regclass
+    ) THEN
+        DROP TRIGGER IF EXISTS events_enqueue_push_match ON events_p2026_02;
+        DROP TRIGGER IF EXISTS events_refresh_channel_ttl ON events_p2026_02;
+        DROP TRIGGER IF EXISTS events_created_at_floor ON events_p2026_02;
+        DROP TRIGGER IF EXISTS community_write_fence_events ON events_p2026_02;
+        DROP TRIGGER IF EXISTS trg_events_guard_channel_roster_snapshot ON events_p2026_02;
+        ALTER TABLE events ATTACH PARTITION events_p2026_02
+            FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'events'::regclass
+          AND inhrelid = 'events_p2026_03'::regclass
+    ) THEN
+        DROP TRIGGER IF EXISTS events_enqueue_push_match ON events_p2026_03;
+        DROP TRIGGER IF EXISTS events_refresh_channel_ttl ON events_p2026_03;
+        DROP TRIGGER IF EXISTS events_created_at_floor ON events_p2026_03;
+        DROP TRIGGER IF EXISTS community_write_fence_events ON events_p2026_03;
+        DROP TRIGGER IF EXISTS trg_events_guard_channel_roster_snapshot ON events_p2026_03;
+        ALTER TABLE events ATTACH PARTITION events_p2026_03
+            FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'events'::regclass
+          AND inhrelid = 'events_p2026_04'::regclass
+    ) THEN
+        DROP TRIGGER IF EXISTS events_enqueue_push_match ON events_p2026_04;
+        DROP TRIGGER IF EXISTS events_refresh_channel_ttl ON events_p2026_04;
+        DROP TRIGGER IF EXISTS events_created_at_floor ON events_p2026_04;
+        DROP TRIGGER IF EXISTS community_write_fence_events ON events_p2026_04;
+        DROP TRIGGER IF EXISTS trg_events_guard_channel_roster_snapshot ON events_p2026_04;
+        ALTER TABLE events ATTACH PARTITION events_p2026_04
+            FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'events'::regclass
+          AND inhrelid = 'events_p2026_05'::regclass
+    ) THEN
+        DROP TRIGGER IF EXISTS events_enqueue_push_match ON events_p2026_05;
+        DROP TRIGGER IF EXISTS events_refresh_channel_ttl ON events_p2026_05;
+        DROP TRIGGER IF EXISTS events_created_at_floor ON events_p2026_05;
+        DROP TRIGGER IF EXISTS community_write_fence_events ON events_p2026_05;
+        DROP TRIGGER IF EXISTS trg_events_guard_channel_roster_snapshot ON events_p2026_05;
+        ALTER TABLE events ATTACH PARTITION events_p2026_05
+            FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'events'::regclass
+          AND inhrelid = 'events_p2026_06'::regclass
+    ) THEN
+        DROP TRIGGER IF EXISTS events_enqueue_push_match ON events_p2026_06;
+        DROP TRIGGER IF EXISTS events_refresh_channel_ttl ON events_p2026_06;
+        DROP TRIGGER IF EXISTS events_created_at_floor ON events_p2026_06;
+        DROP TRIGGER IF EXISTS community_write_fence_events ON events_p2026_06;
+        DROP TRIGGER IF EXISTS trg_events_guard_channel_roster_snapshot ON events_p2026_06;
+        ALTER TABLE events ATTACH PARTITION events_p2026_06
+            FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'events'::regclass
+          AND inhrelid = 'events_p_future'::regclass
+    ) THEN
+        DROP TRIGGER IF EXISTS events_enqueue_push_match ON events_p_future;
+        DROP TRIGGER IF EXISTS events_refresh_channel_ttl ON events_p_future;
+        DROP TRIGGER IF EXISTS events_created_at_floor ON events_p_future;
+        DROP TRIGGER IF EXISTS community_write_fence_events ON events_p_future;
+        DROP TRIGGER IF EXISTS trg_events_guard_channel_roster_snapshot ON events_p_future;
+        ALTER TABLE events ATTACH PARTITION events_p_future
+            FOR VALUES FROM ('2026-07-01') TO (MAXVALUE);
+    END IF;
+
+    -- When pgschema creates partition children as standalone tables, it also
+    -- preserves the parent's identity column on delivery_log children. PostgreSQL
+    -- rejects attaching a child table that has its own identity column, so each
+    -- delivery_log attach path drops that standalone identity first. Raw
+    -- schema-created partitions are already attached, so these branches do not
+    -- run against inherited partition columns.
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'delivery_log'::regclass
+          AND inhrelid = 'delivery_log_p_past'::regclass
+    ) THEN
+        ALTER TABLE delivery_log_p_past ALTER COLUMN id DROP IDENTITY IF EXISTS;
+        DROP TRIGGER IF EXISTS community_write_fence_delivery_log ON delivery_log_p_past;
+        ALTER TABLE delivery_log ATTACH PARTITION delivery_log_p_past
+            FOR VALUES FROM (MINVALUE) TO ('2026-03-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'delivery_log'::regclass
+          AND inhrelid = 'delivery_log_p2026_03'::regclass
+    ) THEN
+        ALTER TABLE delivery_log_p2026_03 ALTER COLUMN id DROP IDENTITY IF EXISTS;
+        DROP TRIGGER IF EXISTS community_write_fence_delivery_log ON delivery_log_p2026_03;
+        ALTER TABLE delivery_log ATTACH PARTITION delivery_log_p2026_03
+            FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'delivery_log'::regclass
+          AND inhrelid = 'delivery_log_p2026_04'::regclass
+    ) THEN
+        ALTER TABLE delivery_log_p2026_04 ALTER COLUMN id DROP IDENTITY IF EXISTS;
+        DROP TRIGGER IF EXISTS community_write_fence_delivery_log ON delivery_log_p2026_04;
+        ALTER TABLE delivery_log ATTACH PARTITION delivery_log_p2026_04
+            FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'delivery_log'::regclass
+          AND inhrelid = 'delivery_log_p2026_05'::regclass
+    ) THEN
+        ALTER TABLE delivery_log_p2026_05 ALTER COLUMN id DROP IDENTITY IF EXISTS;
+        DROP TRIGGER IF EXISTS community_write_fence_delivery_log ON delivery_log_p2026_05;
+        ALTER TABLE delivery_log ATTACH PARTITION delivery_log_p2026_05
+            FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'delivery_log'::regclass
+          AND inhrelid = 'delivery_log_p2026_06'::regclass
+    ) THEN
+        ALTER TABLE delivery_log_p2026_06 ALTER COLUMN id DROP IDENTITY IF EXISTS;
+        DROP TRIGGER IF EXISTS community_write_fence_delivery_log ON delivery_log_p2026_06;
+        ALTER TABLE delivery_log ATTACH PARTITION delivery_log_p2026_06
+            FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_inherits
+        WHERE inhparent = 'delivery_log'::regclass
+          AND inhrelid = 'delivery_log_p_future'::regclass
+    ) THEN
+        ALTER TABLE delivery_log_p_future ALTER COLUMN id DROP IDENTITY IF EXISTS;
+        DROP TRIGGER IF EXISTS community_write_fence_delivery_log ON delivery_log_p_future;
+        ALTER TABLE delivery_log ATTACH PARTITION delivery_log_p_future
+            FOR VALUES FROM ('2026-07-01') TO (MAXVALUE);
+    END IF;
+END $$;
+
+-- pgschema does not execute the write-fence attachment declaration for the
+-- post-0029 conversion claim table. Attach it after desired-state DDL and fail
+-- bootstrap if the live catalog does not contain the guard.
+SELECT attach_community_write_fence('business_proposal_conversion_claims');
+SELECT attach_community_write_fence('company_work_watchdog_deliveries');
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid = 'company_work_watchdog_deliveries'::regclass
+          AND tgname = 'community_write_fence_company_work_watchdog_deliveries'
+          AND NOT tgisinternal
+    ) THEN
+        RAISE EXCEPTION 'company_work_watchdog_deliveries must have its community write fence after pgschema apply';
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid = 'business_proposal_conversion_claims'::regclass
+          AND tgname = 'community_write_fence_business_proposal_conversion_claims'
+          AND NOT tgisinternal
+    ) THEN
+        RAISE EXCEPTION 'business_proposal_conversion_claims must have its community write fence after pgschema apply';
+    END IF;
+END $$;
+
+-- pgschema does not apply operator-global registry seed rows. These accounts
+-- span all communities on a deployment and must never enter tenant deletion.
+INSERT INTO _operator_global_tables (table_name, reason) VALUES
+    ('accounts', 'deployment-global identities and server-held signing-key custody'),
+    ('account_google_identities', 'deployment-global provider links to account identities'),
+    ('account_codes', 'deployment-global one-time account recovery and verification codes'),
+    ('account_code_failures', 'deployment-global hourly email code guessing budgets'),
+    ('account_mail_outbox', 'deployment-global durable account email delivery retry queue'),
+    ('account_test_mail', 'development and CI account mail sink; not tenant-visible'),
+    ('account_credit_ledger', 'deployment-global account credit balance and server-confirmed usage'),
+    ('account_payment_intents', 'deployment-global PayFast credit checkout and settlement state'),
+    ('account_site_subscriptions', 'deployment-global PayFast website hosting subscriptions'),
+    ('account_site_subscription_payments', 'deployment-global PayFast subscription payment history'),
+    ('account_payment_notifications', 'deployment-global idempotent PayFast ITN processing journal')
+ON CONFLICT (table_name) DO UPDATE SET reason = EXCLUDED.reason;
+
+DO $$
+DECLARE
+    missing TEXT[];
+BEGIN
+    SELECT array_agg(table_name ORDER BY table_name)
+    INTO missing
+    FROM (VALUES
+        ('accounts'),
+        ('account_google_identities'),
+        ('account_codes'),
+        ('account_code_failures'),
+        ('account_mail_outbox'),
+        ('account_test_mail'),
+        ('account_credit_ledger'),
+        ('account_payment_intents'),
+        ('account_site_subscriptions'),
+        ('account_site_subscription_payments'),
+        ('account_payment_notifications')
+    ) AS required(table_name)
+    WHERE to_regclass(format('%I.%I', current_schema(), required.table_name)) IS NULL
+       OR NOT EXISTS (
+            SELECT 1 FROM _operator_global_tables AS registry
+            WHERE registry.table_name = required.table_name
+       );
+
+    IF missing IS NOT NULL THEN
+        RAISE EXCEPTION 'account and payment tables must exist and be operator-global after pgschema apply: %', missing;
+    END IF;
+END $$;
+
+-- pgschema reconciles DDL but does not apply seed DML or table storage
+-- parameters from schema/schema.sql. Restore those parts of the desired-state
+-- contract explicitly and fail the bootstrap if the live catalog disagrees.
+ALTER TABLE replica_heartbeat SET (vacuum_truncate = false);
+
+INSERT INTO replica_heartbeat (id) VALUES (1)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_class AS relation
+        JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname = current_schema()
+          AND relation.relname = 'replica_heartbeat'
+          AND COALESCE(
+              relation.reloptions @> ARRAY['vacuum_truncate=false']::text[],
+              false
+          )
+    ) THEN
+        RAISE EXCEPTION 'replica_heartbeat must disable vacuum truncation after pgschema apply';
+    END IF;
+
+    IF (SELECT count(*) FROM replica_heartbeat WHERE id = 1) <> 1 THEN
+        RAISE EXCEPTION 'replica_heartbeat must contain its singleton row after pgschema apply';
+    END IF;
+END $$;
+
+-- pgschema omits this table-level check. Restore it before anonymous account
+-- codes are accepted and verify the live catalog contains a validated guard.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'account_codes'::regclass
+          AND conname = 'account_codes_pending_sign_in_check'
+    ) THEN
+        ALTER TABLE account_codes
+            ADD CONSTRAINT account_codes_pending_sign_in_check
+            CHECK (account_id IS NOT NULL OR purpose = 'sign_in');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'account_codes'::regclass
+          AND conname = 'account_codes_pending_sign_in_check'
+          AND contype = 'c'
+          AND convalidated
+    ) THEN
+        RAISE EXCEPTION 'anonymous account codes must have a validated sign-in-only check after pgschema apply';
+    END IF;
+END $$;
+
+-- pgschema does not execute registry seed DML.
+INSERT INTO _operator_global_tables (table_name, reason) VALUES
+    ('account_ai_sessions', 'deployment-global payer authorization bound to a managed agent and community'),
+    ('account_ai_requests', 'deployment-global durable AI spend reservation and reconciliation journal')
+ON CONFLICT (table_name) DO NOTHING;
+DO $$ BEGIN
+    IF (SELECT count(*) FROM _operator_global_tables WHERE table_name IN ('account_ai_sessions', 'account_ai_requests')) <> 2 THEN
+        RAISE EXCEPTION 'AI gateway global-table registry is incomplete';
+    END IF;
+END $$;

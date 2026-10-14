@@ -1,0 +1,2504 @@
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+
+use axum::body::{to_bytes, Body};
+use axum::extract::ConnectInfo;
+use axum::http::{header, Request, StatusCode};
+use axum::routing::get;
+use axum::{Json, Router};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+use buzz_db::Db;
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use nostr::{EventBuilder, JsonUtil, Keys, Kind, Tag, ToBech32};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use sqlx::PgPool;
+use tower::ServiceExt;
+use uuid::Uuid;
+
+use super::*;
+
+struct AlwaysFreshReplayGuard;
+
+impl buzz_auth::Nip98ReplayGuard for AlwaysFreshReplayGuard {
+    fn try_mark_in_scope<'a>(
+        &'a self,
+        _scope: &'a str,
+        _event_id: &'a nostr::EventId,
+        _ttl_secs: u64,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<bool, buzz_auth::AuthError>> + Send + 'a>,
+    > {
+        Box::pin(async { Ok(true) })
+    }
+}
+
+const TEST_KEK: [u8; 32] = [0x5a; 32];
+const TEST_GOOGLE_AUDIENCE: &str = "colony-test-google-client";
+const FAKE_GOOGLE_PRIVATE_KEY: &str = include_str!("testdata/fake_google_private.pem");
+const FAKE_GOOGLE_JWKS: &str = include_str!("testdata/fake_google_jwks.json");
+
+async fn test_state(
+    google_client_ids: Vec<String>,
+    google_jwks_url: Option<String>,
+) -> (Arc<AppState>, PgPool, String) {
+    let mut config = crate::config::Config::from_env().expect("test relay config");
+    let database_url = crate::test_support::database_url();
+    config.database_url = database_url.clone();
+    config.redis_url =
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_owned());
+    config.require_relay_membership = false;
+    config.accounts = crate::config::AccountConfig::test_config(
+        Some(TEST_KEK),
+        Some(AccountMailMode::Log),
+        google_client_ids,
+        google_jwks_url,
+    );
+    let host = format!("account-test-{}.example", Uuid::new_v4().simple());
+    config.relay_url = format!("wss://{host}");
+
+    let pool = PgPool::connect(&database_url)
+        .await
+        .expect("connect account integration test Postgres");
+    // The shared PostgreSQL test harness clones the current desired schema,
+    // which intentionally has no historical migration ledger. Local runs
+    // against an empty database still need the normal migration path.
+    if !matches!(
+        std::env::var("BUZZ_TEST_SCHEMA_MODE").as_deref(),
+        Ok("desired")
+    ) {
+        buzz_db::migration::run_migrations(&pool)
+            .await
+            .expect("apply account integration schema");
+    }
+    let db = Db::from_pool(pool.clone());
+    db.ensure_configured_community(&host)
+        .await
+        .expect("create account integration community");
+
+    let redis_pool = deadpool_redis::Config::from_url(&config.redis_url)
+        .create_pool(Some(deadpool_redis::Runtime::Tokio1))
+        .expect("create account integration Redis pool");
+    let pubsub = Arc::new(
+        buzz_pubsub::PubSubManager::new(&config.redis_url, redis_pool.clone())
+            .await
+            .expect("connect account integration Redis pubsub"),
+    );
+    let auth = buzz_auth::AuthService::new(config.auth.clone());
+    let search = buzz_search::SearchService::new(pool.clone());
+    let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
+        db.clone(),
+        buzz_workflow::WorkflowConfig::default(),
+    ));
+    let media_storage =
+        buzz_media::MediaStorage::new(&config.media).expect("account integration media config");
+    let (mut state, _audit_shutdown) = AppState::new(
+        config,
+        db,
+        redis_pool,
+        None::<buzz_audit::AuditService>,
+        pubsub,
+        auth,
+        search,
+        workflow_engine,
+        Keys::generate(),
+        media_storage,
+    );
+    state.nip98_replay = Arc::new(AlwaysFreshReplayGuard);
+    (Arc::new(state), pool, host)
+}
+
+fn request_with_ip(
+    method: &str,
+    path: &str,
+    host: &str,
+    ip: Ipv4Addr,
+    body: Vec<u8>,
+    authorization: Option<String>,
+) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::HOST, host)
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(authorization) = authorization {
+        builder = builder.header(header::AUTHORIZATION, authorization);
+    }
+    let mut request = builder
+        .body(Body::from(body))
+        .expect("build account request");
+    request
+        .extensions_mut()
+        .insert(ConnectInfo(SocketAddr::new(IpAddr::V4(ip), 43123)));
+    request
+}
+
+fn nip98_header(keys: &Keys, method: &str, url: &str, body: Option<&[u8]>) -> String {
+    let mut tags = vec![
+        Tag::parse(["u", url]).expect("NIP-98 URL tag"),
+        Tag::parse(["method", method]).expect("NIP-98 method tag"),
+    ];
+    if let Some(body) = body {
+        let hash = hex::encode(Sha256::digest(body));
+        tags.push(Tag::parse(["payload", hash.as_str()]).expect("NIP-98 payload tag"));
+    }
+    let event = EventBuilder::new(Kind::HttpAuth, "")
+        .tags(tags)
+        .sign_with_keys(keys)
+        .expect("sign NIP-98 request");
+    format!(
+        "Nostr {}",
+        BASE64.encode(serde_json::to_vec(&event).expect("serialize NIP-98 event"))
+    )
+}
+
+async fn call(
+    state: Arc<AppState>,
+    method: &str,
+    path: &str,
+    host: &str,
+    ip: Ipv4Addr,
+    body: Value,
+    keys: Option<&Keys>,
+) -> axum::response::Response {
+    let body = serde_json::to_vec(&body).expect("serialize request");
+    let authorization = keys.map(|keys| {
+        nip98_header(
+            keys,
+            method,
+            &format!("https://{host}{path}"),
+            (!body.is_empty()).then_some(body.as_slice()),
+        )
+    });
+    crate::router::build_router(state)
+        .oneshot(request_with_ip(method, path, host, ip, body, authorization))
+        .await
+        .expect("account router response")
+}
+
+async fn json_response(response: axum::response::Response) -> (StatusCode, Value) {
+    let status = response.status();
+    let body = to_bytes(response.into_body(), ACCOUNT_BODY_LIMIT)
+        .await
+        .expect("read account response");
+    let json = if body.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&body).expect("account response JSON")
+    };
+    (status, json)
+}
+
+async fn deliver_pending_mail(state: &Arc<AppState>) {
+    let messages = state
+        .db
+        .claim_account_mail_outbox(buzz_db::accounts::ACCOUNT_MAIL_BATCH_LIMIT)
+        .await
+        .expect("claim test account mail");
+    for message in messages {
+        deliver_mail(state, &message).await;
+    }
+}
+
+async fn test_mail_code(pool: &PgPool, email: &str, purpose: &str) -> String {
+    sqlx::query_scalar(
+        "SELECT code FROM account_test_mail WHERE recipient = $1 AND purpose = $2 \
+         ORDER BY delivered_at DESC LIMIT 1",
+    )
+    .bind(email)
+    .bind(purpose)
+    .fetch_one(pool)
+    .await
+    .expect("read code from the test-only mail sink")
+}
+
+fn wrong_test_code(actual: &str) -> String {
+    if actual == "000000" {
+        "000001".to_owned()
+    } else {
+        "000000".to_owned()
+    }
+}
+
+fn google_token(email: &str, sub: &str) -> String {
+    google_token_with_claims(
+        email,
+        sub,
+        TEST_GOOGLE_AUDIENCE,
+        true,
+        (Utc::now().timestamp() + 600) as u64,
+    )
+}
+
+fn google_token_with_claims(
+    email: &str,
+    sub: &str,
+    audience: &str,
+    email_verified: bool,
+    expires_at: u64,
+) -> String {
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some("fake-google-kid".to_owned());
+    let claims = json!({
+        "iss": "https://accounts.google.com",
+        "aud": audience,
+        "sub": sub,
+        "exp": expires_at,
+        "email": email,
+        "email_verified": email_verified,
+    });
+    encode(
+        &header,
+        &claims,
+        &EncodingKey::from_rsa_pem(FAKE_GOOGLE_PRIVATE_KEY.as_bytes())
+            .expect("parse generated test RSA key"),
+    )
+    .expect("sign generated Google test token")
+}
+
+fn unique_test_ip() -> Ipv4Addr {
+    let bytes = Uuid::new_v4().into_bytes();
+    Ipv4Addr::new(127, bytes[13], bytes[14], bytes[15])
+}
+
+async fn fake_google_jwks() -> (String, tokio::task::JoinHandle<()>) {
+    let jwks: Value = serde_json::from_str(FAKE_GOOGLE_JWKS).expect("parse generated fake JWKS");
+    let app = Router::new().route(
+        "/jwks",
+        get(move || {
+            let jwks = jwks.clone();
+            async move { Json(jwks) }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind local fake JWKS server");
+    let address = listener.local_addr().expect("fake JWKS local address");
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve local fake JWKS");
+    });
+    (format!("http://{address}/jwks"), task)
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn me_returns_account_not_found_for_unclaimed_nip98_signer() {
+    let (state, _pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let signer = Keys::generate();
+    let response = crate::router::build_router(state)
+        .oneshot(request_with_ip(
+            "GET",
+            "/api/accounts/me",
+            &host,
+            ip,
+            Vec::new(),
+            Some(nip98_header(
+                &signer,
+                "GET",
+                &format!("https://{host}/api/accounts/me"),
+                None,
+            )),
+        ))
+        .await
+        .expect("account profile response for unclaimed signer");
+    let (status, body) = json_response(response).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body, json!({ "error": "account_not_found" }));
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn signup_verify_signin_reset_claim_me_password_and_delete_use_production_routes() {
+    let (state, pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let email = format!("owner-{}@example.test", Uuid::new_v4().simple());
+    let password = "original-passphrase";
+    let signup = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signup",
+        &host,
+        ip,
+        json!({ "email": email, "password": password }),
+        None,
+    )
+    .await;
+    let (signup_status, signup_body) = json_response(signup).await;
+    assert_eq!(signup_status, StatusCode::ACCEPTED);
+    assert_eq!(signup_body["status"], "verification_sent");
+    assert_eq!(
+        signup_body["retry_after_secs"],
+        ACCOUNT_CODE_RESEND_COOLDOWN_SECS
+    );
+    deliver_pending_mail(&state).await;
+    let verification_code = test_mail_code(&pool, &email, "verify_email").await;
+    let (verify_status, verify_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/verify",
+            &host,
+            ip,
+            json!({ "email": email, "code": verification_code.clone() }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(verify_status, StatusCode::OK);
+    let original_pubkey = verify_body["account"]["pubkey"]
+        .as_str()
+        .expect("session public key")
+        .to_owned();
+    let original_nsec = verify_body["nsec"].as_str().expect("session key");
+    let original_nsec = Zeroizing::new(original_nsec.to_owned());
+
+    for (candidate, expected_status) in [
+        (password, StatusCode::OK),
+        ("not-the-correct-password", StatusCode::UNAUTHORIZED),
+    ] {
+        let (status, body) = json_response(
+            call(
+                state.clone(),
+                "POST",
+                "/api/accounts/signin",
+                &host,
+                ip,
+                json!({ "email": email, "password": candidate }),
+                None,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, expected_status);
+        if status == StatusCode::OK {
+            assert_eq!(
+                body["account"]["pubkey"].as_str(),
+                Some(original_pubkey.as_str())
+            );
+            assert!(body["nsec"]
+                .as_str()
+                .is_some_and(|nsec| nsec == original_nsec.as_str()));
+        }
+    }
+
+    let reset_request = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/reset/request",
+        &host,
+        ip,
+        json!({ "email": email }),
+        None,
+    )
+    .await;
+    assert_eq!(reset_request.status(), StatusCode::ACCEPTED);
+    let (reset_request_status, reset_request_body) = json_response(reset_request).await;
+    assert_eq!(reset_request_status, StatusCode::ACCEPTED);
+    assert_eq!(
+        reset_request_body["retry_after_secs"],
+        ACCOUNT_CODE_RESEND_COOLDOWN_SECS
+    );
+    deliver_pending_mail(&state).await;
+    let reset_code = test_mail_code(&pool, &email, "reset_password").await;
+    let reset_password = "recovered-passphrase";
+    let (check_status, check_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/check",
+            &host,
+            ip,
+            json!({ "email": email, "code": reset_code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(check_status, StatusCode::OK);
+    assert_eq!(check_body["status"], "code_valid");
+    let (reset_status, reset_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/confirm",
+            &host,
+            ip,
+            json!({ "email": email, "code": reset_code.clone(), "new_password": reset_password }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(reset_status, StatusCode::OK);
+    assert_eq!(
+        reset_body["account"]["pubkey"].as_str(),
+        Some(original_pubkey.as_str())
+    );
+    assert!(reset_body["nsec"]
+        .as_str()
+        .is_some_and(|nsec| nsec == original_nsec.as_str()));
+
+    let (replay_status, replay_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/confirm",
+            &host,
+            ip,
+            json!({ "email": email, "code": reset_code, "new_password": reset_password }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(replay_status, StatusCode::GONE);
+    assert_eq!(replay_body["error"], "code_expired");
+
+    let (login_status, login_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/signin",
+            &host,
+            ip,
+            json!({ "email": email, "password": reset_password }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(login_status, StatusCode::OK);
+    assert_eq!(
+        login_body["account"]["pubkey"].as_str(),
+        Some(original_pubkey.as_str())
+    );
+
+    let nostr_keys = Keys::parse(original_nsec.as_str()).expect("parse returned account key");
+    let new_password_body = json!({ "new_password": "claimed-password" });
+    let new_password_bytes =
+        serde_json::to_vec(&new_password_body).expect("serialize password body");
+    let set_password = crate::router::build_router(state.clone())
+        .oneshot(request_with_ip(
+            "POST",
+            "/api/accounts/password",
+            &host,
+            ip,
+            new_password_bytes.clone(),
+            Some(nip98_header(
+                &nostr_keys,
+                "POST",
+                &format!("https://{host}/api/accounts/password"),
+                Some(&new_password_bytes),
+            )),
+        ))
+        .await
+        .expect("password route response");
+    assert_eq!(set_password.status(), StatusCode::NO_CONTENT);
+
+    let me = crate::router::build_router(state.clone())
+        .oneshot(request_with_ip(
+            "GET",
+            "/api/accounts/me",
+            &host,
+            ip,
+            Vec::new(),
+            Some(nip98_header(
+                &nostr_keys,
+                "GET",
+                &format!("https://{host}/api/accounts/me"),
+                None,
+            )),
+        ))
+        .await
+        .expect("account profile route response");
+    let (me_status, me_body) = json_response(me).await;
+    assert_eq!(me_status, StatusCode::OK);
+    assert_eq!(me_body["pubkey"].as_str(), Some(original_pubkey.as_str()));
+    assert_eq!(
+        me_body["account"]["pubkey"].as_str(),
+        Some(original_pubkey.as_str())
+    );
+    let mut flat = me_body.clone();
+    flat.as_object_mut()
+        .expect("public account object")
+        .remove("account");
+    assert_eq!(flat, me_body["account"]);
+    assert!(me_body.get("nsec").is_none());
+    assert!(me_body["account"].get("nsec").is_none());
+
+    let delete = crate::router::build_router(state.clone())
+        .oneshot(request_with_ip(
+            "DELETE",
+            "/api/accounts/me",
+            &host,
+            ip,
+            Vec::new(),
+            Some(nip98_header(
+                &nostr_keys,
+                "DELETE",
+                &format!("https://{host}/api/accounts/me"),
+                None,
+            )),
+        ))
+        .await
+        .expect("account delete route response");
+    assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+    let deleted_count: i64 = sqlx::query_scalar("SELECT count(*) FROM accounts WHERE email = $1")
+        .bind(&email)
+        .fetch_one(&pool)
+        .await
+        .expect("check deleted account");
+    assert_eq!(deleted_count, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn signup_stores_server_signed_profile_and_reset_check_keeps_code_for_confirmation() {
+    let (state, pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let email = format!("profile-{}@example.test", Uuid::new_v4().simple());
+    let signup = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signup",
+        &host,
+        ip,
+        json!({
+            "email": email,
+            "password": "profile-test-password",
+            "display_name": "Ada Lovelace",
+        }),
+        None,
+    )
+    .await;
+    let (signup_status, signup_body) = json_response(signup).await;
+    assert_eq!(signup_status, StatusCode::ACCEPTED);
+    assert_eq!(
+        signup_body["retry_after_secs"],
+        ACCOUNT_CODE_RESEND_COOLDOWN_SECS
+    );
+
+    let (resend_status, resend_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/resend-code",
+            &host,
+            ip,
+            json!({ "email": email, "purpose": "verify" }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(resend_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(resend_body["error"], "resend_cooldown");
+    assert!(resend_body["retry_after_secs"].as_i64().unwrap_or_default() > 0);
+
+    let pubkey: String = sqlx::query_scalar("SELECT pubkey FROM accounts WHERE email = $1")
+        .bind(&email)
+        .fetch_one(&pool)
+        .await
+        .expect("signup account pubkey");
+    let community_id: Uuid = sqlx::query_scalar("SELECT id FROM communities WHERE host = $1")
+        .bind(&host)
+        .fetch_one(&pool)
+        .await
+        .expect("signup community id");
+    let event_json: Value = sqlx::query_scalar(
+        "SELECT jsonb_build_object( \
+             'id', encode(id, 'hex'), \
+             'pubkey', encode(pubkey, 'hex'), \
+             'created_at', FLOOR(EXTRACT(EPOCH FROM created_at))::BIGINT, \
+             'kind', kind, 'tags', tags, 'content', content, \
+             'sig', encode(sig, 'hex')) \
+         FROM events WHERE community_id = $1 AND pubkey = $2 AND kind = 0 \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(community_id)
+    .bind(hex::decode(&pubkey).expect("decode profile pubkey"))
+    .fetch_one(&pool)
+    .await
+    .expect("signup kind-zero profile event");
+    let profile_event =
+        nostr::Event::from_json(event_json.to_string()).expect("parse stored profile event");
+    assert_eq!(profile_event.kind, Kind::Metadata);
+    assert_eq!(
+        serde_json::from_str::<Value>(&profile_event.content).expect("profile content"),
+        json!({ "display_name": "Ada Lovelace" })
+    );
+    assert!(profile_event.verify_id());
+    assert!(profile_event.verify_signature());
+
+    deliver_pending_mail(&state).await;
+    let verification_code = test_mail_code(&pool, &email, "verify_email").await;
+    let (verify_status, verify_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/verify",
+            &host,
+            ip,
+            json!({ "email": email, "code": verification_code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(verify_status, StatusCode::OK);
+    assert_eq!(verify_body["account"]["pubkey"], pubkey);
+    let (verify_replay_status, verify_replay_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/verify",
+            &host,
+            ip,
+            json!({ "email": email, "code": verification_code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(verify_replay_status, StatusCode::GONE);
+    assert_eq!(verify_replay_body["error"], "code_expired");
+
+    let reset_request = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/reset/request",
+        &host,
+        ip,
+        json!({ "email": email }),
+        None,
+    )
+    .await;
+    assert_eq!(reset_request.status(), StatusCode::ACCEPTED);
+    let (reset_resend_status, reset_resend_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/resend-code",
+            &host,
+            ip,
+            json!({ "email": email, "purpose": "reset" }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(reset_resend_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(reset_resend_body["error"], "resend_cooldown");
+    assert!(
+        reset_resend_body["retry_after_secs"]
+            .as_i64()
+            .unwrap_or_default()
+            > 0
+    );
+    deliver_pending_mail(&state).await;
+    let reset_code = test_mail_code(&pool, &email, "reset_password").await;
+    let wrong_code = wrong_test_code(&reset_code);
+    let (wrong_status, wrong_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/check",
+            &host,
+            ip,
+            json!({ "email": email, "code": wrong_code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(wrong_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(wrong_body["error"], "wrong_code");
+    assert_eq!(wrong_body["attempts_left"], 4);
+
+    let (check_status, check_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/check",
+            &host,
+            ip,
+            json!({ "email": email, "code": reset_code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(check_status, StatusCode::OK);
+    assert_eq!(check_body["status"], "code_valid");
+
+    let confirm = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/reset/confirm",
+        &host,
+        ip,
+        json!({
+            "email": email,
+            "code": reset_code,
+            "new_password": "profile-reset-password",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(confirm.status(), StatusCode::OK);
+    let replay = call(
+        state,
+        "POST",
+        "/api/accounts/reset/confirm",
+        &host,
+        ip,
+        json!({
+            "email": email,
+            "code": reset_code,
+            "new_password": "profile-reset-password-2",
+        }),
+        None,
+    )
+    .await;
+    let (replay_status, replay_body) = json_response(replay).await;
+    assert_eq!(replay_status, StatusCode::GONE);
+    assert_eq!(replay_body["error"], "code_expired");
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn verification_code_reports_remaining_attempts_and_resend_lockout() {
+    let (state, pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let email = format!("verify-lock-{}@example.test", Uuid::new_v4().simple());
+    let signup = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signup",
+        &host,
+        ip,
+        json!({ "email": email, "password": "verify-lock-password" }),
+        None,
+    )
+    .await;
+    assert_eq!(signup.status(), StatusCode::ACCEPTED);
+    deliver_pending_mail(&state).await;
+    let actual_code = test_mail_code(&pool, &email, "verify_email").await;
+    let wrong_code = wrong_test_code(&actual_code);
+
+    for attempts_left in (1..=4).rev() {
+        let (status, body) = json_response(
+            call(
+                state.clone(),
+                "POST",
+                "/api/accounts/verify",
+                &host,
+                ip,
+                json!({ "email": email, "code": wrong_code }),
+                None,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"], "wrong_code");
+        assert_eq!(body["attempts_left"], attempts_left);
+    }
+
+    let (locked_status, locked_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/verify",
+            &host,
+            ip,
+            json!({ "email": email, "code": wrong_code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(locked_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(locked_body["error"], "too_many_attempts");
+    assert!(locked_body["retry_after_secs"].as_i64().unwrap_or_default() > 0);
+
+    let account = state
+        .db
+        .account_by_email(&email)
+        .await
+        .expect("read locked verification account")
+        .expect("locked verification account exists");
+    let (_, replacement) = new_code(&TEST_KEK, AccountCodePurpose::VerifyEmail)
+        .expect("generate replacement verification code");
+    let issue = state
+        .db
+        .issue_account_code(account.id, &account.email, &replacement)
+        .await
+        .expect("attempt direct replacement of locked verification code");
+    assert!(matches!(
+        issue,
+        IssueAccountCodeOutcome::Locked { retry_after_secs } if retry_after_secs > 0
+    ));
+
+    let (resend_status, resend_body) = json_response(
+        call(
+            state,
+            "POST",
+            "/api/accounts/resend-code",
+            &host,
+            ip,
+            json!({ "email": email, "purpose": "verify" }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(resend_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(resend_body["error"], "too_many_attempts");
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn reset_code_reports_attempt_limit_without_consuming_on_check() {
+    let (state, pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let email = format!("reset-lock-{}@example.test", Uuid::new_v4().simple());
+    let signup = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signup",
+        &host,
+        ip,
+        json!({ "email": email, "password": "reset-lock-password" }),
+        None,
+    )
+    .await;
+    assert_eq!(signup.status(), StatusCode::ACCEPTED);
+    deliver_pending_mail(&state).await;
+    let verification_code = test_mail_code(&pool, &email, "verify_email").await;
+    let verified = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/verify",
+        &host,
+        ip,
+        json!({ "email": email, "code": verification_code }),
+        None,
+    )
+    .await;
+    assert_eq!(verified.status(), StatusCode::OK);
+    assert_eq!(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/request",
+            &host,
+            ip,
+            json!({ "email": email }),
+            None,
+        )
+        .await
+        .status(),
+        StatusCode::ACCEPTED
+    );
+    deliver_pending_mail(&state).await;
+    let reset_code = test_mail_code(&pool, &email, "reset_password").await;
+    let wrong_code = wrong_test_code(&reset_code);
+
+    let (confirm_wrong_status, confirm_wrong_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/confirm",
+            &host,
+            ip,
+            json!({
+                "email": email,
+                "code": wrong_code,
+                "new_password": "reset-confirm-password",
+            }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(confirm_wrong_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(confirm_wrong_body["error"], "wrong_code");
+    assert_eq!(confirm_wrong_body["attempts_left"], 4);
+
+    for attempts_left in (1..=3).rev() {
+        let (status, body) = json_response(
+            call(
+                state.clone(),
+                "POST",
+                "/api/accounts/reset/check",
+                &host,
+                ip,
+                json!({ "email": email, "code": wrong_code }),
+                None,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"], "wrong_code");
+        assert_eq!(body["attempts_left"], attempts_left);
+    }
+    let (locked_status, locked_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/check",
+            &host,
+            ip,
+            json!({ "email": email, "code": wrong_code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(locked_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(locked_body["error"], "too_many_attempts");
+    assert!(locked_body["retry_after_secs"].as_i64().unwrap_or_default() > 0);
+
+    let (confirm_locked_status, confirm_locked_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/confirm",
+            &host,
+            ip,
+            json!({
+                "email": email,
+                "code": reset_code,
+                "new_password": "reset-confirm-password-2",
+            }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(confirm_locked_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(confirm_locked_body["error"], "too_many_attempts");
+    assert!(
+        confirm_locked_body["retry_after_secs"]
+            .as_i64()
+            .unwrap_or_default()
+            > 0
+    );
+
+    let (resend_status, resend_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/resend-code",
+            &host,
+            ip,
+            json!({ "email": email, "purpose": "reset" }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(resend_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(resend_body["error"], "too_many_attempts");
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn google_test_jwks_creates_accounts_and_links_verified_email() {
+    let (jwks_url, server) = fake_google_jwks().await;
+    let (state, pool, host) =
+        test_state(vec![TEST_GOOGLE_AUDIENCE.to_owned()], Some(jwks_url)).await;
+    let ip = unique_test_ip();
+    let new_email = format!("google-new-{}@example.test", Uuid::new_v4().simple());
+    let new_sub = format!("fake-google-sub-new-{}", Uuid::new_v4().simple());
+    for invalid_token in [
+        google_token_with_claims(
+            "unverified@example.test",
+            "unverified-test-sub",
+            TEST_GOOGLE_AUDIENCE,
+            false,
+            (Utc::now().timestamp() + 600) as u64,
+        ),
+        google_token_with_claims(
+            "wrong-audience@example.test",
+            "wrong-audience-test-sub",
+            "another-test-client",
+            true,
+            (Utc::now().timestamp() + 600) as u64,
+        ),
+        google_token_with_claims(
+            "expired@example.test",
+            "expired-test-sub",
+            TEST_GOOGLE_AUDIENCE,
+            true,
+            0,
+        ),
+    ] {
+        let (status, _) = json_response(
+            call(
+                state.clone(),
+                "POST",
+                "/api/accounts/google",
+                &host,
+                ip,
+                json!({ "id_token": invalid_token }),
+                None,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let token = google_token(&new_email, &new_sub);
+    let (new_status, new_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/google",
+            &host,
+            ip,
+            json!({ "id_token": token }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(new_status, StatusCode::OK);
+    assert_eq!(
+        new_body["account"]["email"].as_str(),
+        Some(new_email.as_str())
+    );
+    let new_pubkey = new_body["account"]["pubkey"]
+        .as_str()
+        .expect("Google account pubkey");
+
+    let linked_email = format!("google-link-{}@example.test", Uuid::new_v4().simple());
+    let signup = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signup",
+        &host,
+        ip,
+        json!({ "email": linked_email, "password": "original-link-password" }),
+        None,
+    )
+    .await;
+    assert_eq!(signup.status(), StatusCode::ACCEPTED);
+    deliver_pending_mail(&state).await;
+    let code = test_mail_code(&pool, &linked_email, "verify_email").await;
+    let (verify_status, verify_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/verify",
+            &host,
+            ip,
+            json!({ "email": linked_email, "code": code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(verify_status, StatusCode::OK);
+    let original_pubkey = verify_body["account"]["pubkey"]
+        .as_str()
+        .expect("verified account key");
+    let linked_sub = format!("fake-google-sub-link-{}", Uuid::new_v4().simple());
+    let token = google_token(&linked_email, &linked_sub);
+    let (link_status, link_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/google",
+            &host,
+            ip,
+            json!({ "id_token": token }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(link_status, StatusCode::OK);
+    assert_eq!(
+        link_body["account"]["pubkey"].as_str(),
+        Some(original_pubkey)
+    );
+    assert_eq!(link_body["account"]["google_linked"].as_bool(), Some(true));
+    assert_ne!(new_pubkey, original_pubkey);
+    server.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn claim_requires_matching_nip98_signer_and_returns_verification_only() {
+    let (state, pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let email = format!("claim-{}@example.test", Uuid::new_v4().simple());
+    let (pubkey, nsec) = crypto::generate_nostr_identity().expect("create test account identity");
+    let (_other_pubkey, other_nsec) =
+        crypto::generate_nostr_identity().expect("create other identity");
+    let mismatched = json!({
+        "email": email,
+        "password": "claim-passphrase",
+        "nsec": other_nsec.as_str(),
+    });
+    let mismatched_bytes = serde_json::to_vec(&mismatched).expect("serialize mismatched claim");
+    let other_keys = Keys::parse(&nsec).expect("parse claim signer key");
+    let mismatch_response = crate::router::build_router(state.clone())
+        .oneshot(request_with_ip(
+            "POST",
+            "/api/accounts/claim",
+            &host,
+            ip,
+            mismatched_bytes.clone(),
+            Some(nip98_header(
+                &other_keys,
+                "POST",
+                &format!("https://{host}/api/accounts/claim"),
+                Some(&mismatched_bytes),
+            )),
+        ))
+        .await
+        .expect("mismatched claim response");
+    assert_eq!(mismatch_response.status(), StatusCode::UNAUTHORIZED);
+
+    let claim = json!({
+        "email": email,
+        "password": "claim-passphrase",
+        "nsec": nsec.as_str(),
+    });
+    let claim_bytes = serde_json::to_vec(&claim).expect("serialize claim body");
+    let keys = Keys::parse(&nsec).expect("parse matching claim key");
+    let response = crate::router::build_router(state.clone())
+        .oneshot(request_with_ip(
+            "POST",
+            "/api/accounts/claim",
+            &host,
+            ip,
+            claim_bytes.clone(),
+            Some(nip98_header(
+                &keys,
+                "POST",
+                &format!("https://{host}/api/accounts/claim"),
+                Some(&claim_bytes),
+            )),
+        ))
+        .await
+        .expect("matching claim response");
+    let (claim_status, claim_body) = json_response(response).await;
+    assert_eq!(claim_status, StatusCode::ACCEPTED);
+    assert_eq!(claim_body["status"], "verification_sent");
+    let account = state
+        .db
+        .account_by_email(&email)
+        .await
+        .expect("read claimed account")
+        .expect("claimed account exists");
+    assert_eq!(account.pubkey, pubkey);
+    assert!(account.email_verified_at.is_none());
+    deliver_pending_mail(&state).await;
+    let code = test_mail_code(&pool, &email, "verify_email").await;
+    let (verify_status, verify_body) = json_response(
+        call(
+            state,
+            "POST",
+            "/api/accounts/verify",
+            &host,
+            ip,
+            json!({ "email": email, "code": code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(verify_status, StatusCode::OK);
+    assert_eq!(
+        verify_body["account"]["pubkey"].as_str(),
+        Some(pubkey.as_str())
+    );
+    assert!(verify_body["nsec"]
+        .as_str()
+        .is_some_and(|value| value == nsec.as_str()));
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn lockout_enumeration_code_expiry_attempts_and_ip_email_limits_are_enforced() {
+    let (state, pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let email = format!("limit-{}@example.test", Uuid::new_v4().simple());
+    let signup = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signup",
+        &host,
+        ip,
+        json!({ "email": email, "password": "lockout-passphrase" }),
+        None,
+    )
+    .await;
+    assert_eq!(signup.status(), StatusCode::ACCEPTED);
+    deliver_pending_mail(&state).await;
+    let code = test_mail_code(&pool, &email, "verify_email").await;
+    assert_eq!(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/verify",
+            &host,
+            ip,
+            json!({ "email": email, "code": code }),
+            None
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+
+    for _ in 0..5 {
+        let wrong = call(
+            state.clone(),
+            "POST",
+            "/api/accounts/signin",
+            &host,
+            ip,
+            json!({ "email": email, "password": "wrong-lockout-passphrase" }),
+            None,
+        )
+        .await;
+        assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+    }
+    let locked = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signin",
+        &host,
+        ip,
+        json!({ "email": email, "password": "lockout-passphrase" }),
+        None,
+    )
+    .await;
+    assert_eq!(locked.status(), StatusCode::UNAUTHORIZED);
+
+    let missing = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/signin",
+            &host,
+            unique_test_ip(),
+            json!({ "email": "missing-user@example.test", "password": "wrong-lockout-passphrase" }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    let wrong_existing = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/signin",
+            &host,
+            unique_test_ip(),
+            json!({ "email": email, "password": "wrong-lockout-passphrase" }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(missing.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(wrong_existing.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(missing.1, wrong_existing.1);
+
+    let attempted_email = format!("attempts-{}@example.test", Uuid::new_v4().simple());
+    let attempt_signup = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signup",
+        &host,
+        ip,
+        json!({ "email": attempted_email, "password": "attempts-passphrase" }),
+        None,
+    )
+    .await;
+    assert_eq!(attempt_signup.status(), StatusCode::ACCEPTED);
+    deliver_pending_mail(&state).await;
+    let actual_code = test_mail_code(&pool, &attempted_email, "verify_email").await;
+    let wrong_code = if actual_code == "000000" {
+        "000001"
+    } else {
+        "000000"
+    };
+    for attempts_left in (1..=4).rev() {
+        let response = call(
+            state.clone(),
+            "POST",
+            "/api/accounts/verify",
+            &host,
+            ip,
+            json!({ "email": attempted_email, "code": wrong_code }),
+            None,
+        )
+        .await;
+        let (status, body) = json_response(response).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"], "wrong_code");
+        assert_eq!(body["attempts_left"], attempts_left);
+    }
+    let fifth_wrong_code = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/verify",
+        &host,
+        ip,
+        json!({ "email": attempted_email, "code": wrong_code }),
+        None,
+    )
+    .await;
+    let (fifth_status, fifth_body) = json_response(fifth_wrong_code).await;
+    assert_eq!(fifth_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(fifth_body["error"], "too_many_attempts");
+    assert!(fifth_body["retry_after_secs"]
+        .as_i64()
+        .is_some_and(|seconds| seconds > 0));
+    let locked_code = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/verify",
+        &host,
+        ip,
+        json!({ "email": attempted_email, "code": actual_code }),
+        None,
+    )
+    .await;
+    let (locked_status, locked_body) = json_response(locked_code).await;
+    assert_eq!(locked_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(locked_body["error"], "too_many_attempts");
+    assert!(locked_body["retry_after_secs"]
+        .as_i64()
+        .is_some_and(|seconds| seconds > 0));
+
+    let expired_email = format!("expired-{}@example.test", Uuid::new_v4().simple());
+    let expired_signup = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signup",
+        &host,
+        ip,
+        json!({ "email": expired_email, "password": "expired-passphrase" }),
+        None,
+    )
+    .await;
+    assert_eq!(expired_signup.status(), StatusCode::ACCEPTED);
+    deliver_pending_mail(&state).await;
+    let expired_code = test_mail_code(&pool, &expired_email, "verify_email").await;
+    sqlx::query(
+        "UPDATE account_codes c SET expires_at = now() - interval '1 minute' \
+         FROM accounts a WHERE c.account_id = a.id AND a.email = $1 AND c.consumed_at IS NULL",
+    )
+    .bind(&expired_email)
+    .execute(&pool)
+    .await
+    .expect("expire verification code");
+    let expired_response = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/verify",
+        &host,
+        ip,
+        json!({ "email": expired_email, "code": expired_code }),
+        None,
+    )
+    .await;
+    assert_eq!(expired_response.status(), StatusCode::GONE);
+
+    let email_limited = format!("email-rate-{}@example.test", Uuid::new_v4().simple());
+    for attempt in 0..=EMAIL_RATE_LIMIT {
+        let response = call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/request",
+            &host,
+            unique_test_ip(),
+            json!({ "email": email_limited }),
+            None,
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            if attempt < EMAIL_RATE_LIMIT {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::TOO_MANY_REQUESTS
+            }
+        );
+        if attempt == EMAIL_RATE_LIMIT {
+            let (_, body) = json_response(response).await;
+            assert_eq!(body["error"], "rate_limited");
+            assert!(body["retry_after_secs"]
+                .as_i64()
+                .is_some_and(|seconds| seconds > 0));
+        }
+    }
+
+    let ip_base = unique_test_ip();
+    for attempt in 0..=IP_RATE_LIMIT {
+        let email = format!("ip-rate-{attempt}-{}@example.test", Uuid::new_v4().simple());
+        let response = call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/request",
+            &host,
+            ip_base,
+            json!({ "email": email }),
+            None,
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            if attempt < IP_RATE_LIMIT {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::TOO_MANY_REQUESTS
+            }
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn reset_requests_do_not_enumerate_and_signup_is_the_only_email_conflict() {
+    let (state, _pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let email = format!("enumeration-{}@example.test", Uuid::new_v4().simple());
+    let signup = call(
+        state.clone(),
+        "POST",
+        "/api/accounts/signup",
+        &host,
+        ip,
+        json!({ "email": email, "password": "enumeration-passphrase" }),
+        None,
+    )
+    .await;
+    assert_eq!(signup.status(), StatusCode::ACCEPTED);
+    let duplicate = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/signup",
+            &host,
+            ip,
+            json!({ "email": email, "password": "enumeration-passphrase" }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(duplicate.0, StatusCode::CONFLICT);
+    assert_eq!(duplicate.1["error"], "email_taken");
+
+    let existing = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/reset/request",
+            &host,
+            ip,
+            json!({ "email": email }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    let missing = json_response(
+        call(
+            state,
+            "POST",
+            "/api/accounts/reset/request",
+            &host,
+            ip,
+            json!({ "email": "not-present@example.test" }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(existing, missing);
+    assert_eq!(existing.0, StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn account_configuration_debug_never_contains_the_master_key() {
+    let (state, _pool, _host) = test_state(Vec::new(), None).await;
+    let debug = format!("{:?}", state.config.accounts);
+    let encoded_key = BASE64.encode(TEST_KEK);
+    assert!(debug.contains("[REDACTED]"));
+    assert!(!debug.contains(&encoded_key));
+}
+
+async fn clear_sign_in_cooldown(state: &Arc<AppState>, email: &str) {
+    let digest = hex::encode(Sha256::digest(email.as_bytes()));
+    let key = format!("colony:account-code-cooldown:sign_in:{digest}");
+    let mut connection = state
+        .redis_pool
+        .get()
+        .await
+        .expect("account test Redis connection");
+    let _: i64 = redis::cmd("DEL")
+        .arg(key)
+        .query_async(&mut *connection)
+        .await
+        .expect("clear the sign-in cooldown");
+}
+
+async fn test_mail_count(pool: &PgPool, email: &str, purpose: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM account_test_mail WHERE recipient = $1 AND purpose = $2",
+    )
+    .bind(email)
+    .bind(purpose)
+    .fetch_one(pool)
+    .await
+    .expect("count test-only mail")
+}
+
+async fn code_start(
+    state: &Arc<AppState>,
+    host: &str,
+    ip: Ipv4Addr,
+    email: &str,
+) -> (StatusCode, Value) {
+    json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/code/start",
+            host,
+            ip,
+            json!({ "email": email }),
+            None,
+        )
+        .await,
+    )
+    .await
+}
+
+async fn code_verify(
+    state: &Arc<AppState>,
+    host: &str,
+    ip: Ipv4Addr,
+    body: Value,
+) -> (StatusCode, Value) {
+    json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/code/verify",
+            host,
+            ip,
+            body,
+            None,
+        )
+        .await,
+    )
+    .await
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn guessing_budget_survives_three_sign_in_and_reset_codes() {
+    let (state, pool, host) = test_state(Vec::new(), None).await;
+    for reset in [false, true] {
+        let ip = unique_test_ip();
+        let email = format!(
+            "persistent-code-budget-{}@example.test",
+            Uuid::new_v4().simple()
+        );
+        assert_eq!(
+            call(
+                state.clone(),
+                "POST",
+                "/api/accounts/signup",
+                &host,
+                ip,
+                json!({ "email": email, "password": "verified-budget-password" }),
+                None
+            )
+            .await
+            .status(),
+            StatusCode::ACCEPTED
+        );
+        deliver_pending_mail(&state).await;
+        let verify_code = test_mail_code(&pool, &email, "verify_email").await;
+        assert_eq!(
+            call(
+                state.clone(),
+                "POST",
+                "/api/accounts/verify",
+                &host,
+                ip,
+                json!({ "email": email, "code": verify_code }),
+                None
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        let (purpose, database_purpose, start_path, verify_path) = if reset {
+            (
+                AccountCodePurpose::ResetPassword,
+                "reset_password",
+                "/api/accounts/reset/request",
+                "/api/accounts/reset/check",
+            )
+        } else {
+            (
+                AccountCodePurpose::SignIn,
+                "sign_in",
+                "/api/accounts/code/start",
+                "/api/accounts/code/verify",
+            )
+        };
+        let mut last_code = String::new();
+        for (generation, guesses) in [4, 4, 2].into_iter().enumerate() {
+            clear_code_cooldown_for_test(&state, &email, purpose).await;
+            let response = call(
+                state.clone(),
+                "POST",
+                start_path,
+                &host,
+                ip,
+                json!({ "email": email }),
+                None,
+            )
+            .await;
+            assert!(response.status().is_success());
+            deliver_pending_mail(&state).await;
+            let issued: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM account_codes WHERE email = $1 AND purpose = $2",
+            )
+            .bind(&email)
+            .bind(database_purpose)
+            .fetch_one(&pool)
+            .await
+            .expect("each generation issued a distinct code");
+            assert_eq!(issued, generation as i64 + 1);
+            last_code = test_mail_code(&pool, &email, database_purpose).await;
+            let wrong = wrong_test_code(&last_code);
+            for attempt in 0..guesses {
+                let body = if reset {
+                    json!({ "email": email, "code": wrong })
+                } else {
+                    json!({ "email": email, "code": wrong, "termsVersion": "2026-10-11" })
+                };
+                let (status, body) = json_response(
+                    call(state.clone(), "POST", verify_path, &host, ip, body, None).await,
+                )
+                .await;
+                if generation == 2 && attempt == 1 {
+                    assert_eq!(
+                        status,
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "the tenth guess spans replacement codes"
+                    );
+                    assert_eq!(body["error"], "too_many_attempts");
+                    assert!(body["retry_after_secs"]
+                        .as_i64()
+                        .is_some_and(|wait| wait > 15 * 60));
+                } else {
+                    assert_eq!(
+                        status,
+                        if reset {
+                            StatusCode::UNPROCESSABLE_ENTITY
+                        } else {
+                            StatusCode::BAD_REQUEST
+                        },
+                        "generation {generation}, attempt {attempt}: {body}"
+                    );
+                }
+            }
+        }
+        clear_email_rate_for_test(&state, verify_path, &email).await;
+        let correct = if reset {
+            json!({ "email": email, "code": last_code })
+        } else {
+            json!({ "email": email, "code": last_code, "termsVersion": "2026-10-11" })
+        };
+        assert_eq!(
+            call(
+                state.clone(),
+                "POST",
+                verify_path,
+                &host,
+                ip,
+                correct.clone(),
+                None
+            )
+            .await
+            .status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "the correct third code cannot bypass the email budget"
+        );
+        clear_code_cooldown_for_test(&state, &email, purpose).await;
+        assert!(call(
+            state.clone(),
+            "POST",
+            start_path,
+            &host,
+            ip,
+            json!({ "email": email }),
+            None
+        )
+        .await
+        .status()
+        .is_success());
+        let issued: i64 = sqlx::query_scalar("SELECT count(*) FROM account_codes c JOIN accounts a ON a.id = c.account_id WHERE a.email = $1 AND c.purpose = $2")
+            .bind(&email).bind(database_purpose).fetch_one(&pool).await.expect("issued code count");
+        assert_eq!(issued, 3, "a new start cannot reset the email budget");
+
+        sqlx::query("UPDATE account_code_failures SET window_started_at = now() - interval '61 minutes' WHERE email = $1")
+            .bind(&email).execute(&pool).await.expect("advance the failure window only");
+        assert_eq!(
+            call(state.clone(), "POST", verify_path, &host, ip, correct, None)
+                .await
+                .status(),
+            StatusCode::OK,
+            "the budget expires without replacing the active code"
+        );
+        if reset {
+            let (status, _) = json_response(call(state.clone(), "POST", "/api/accounts/reset/confirm", &host, ip,
+                json!({ "email": email, "code": last_code, "new_password": "recovered-budget-password" }), None).await).await;
+            assert_eq!(status, StatusCode::OK);
+        }
+        let failures: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM account_code_failures WHERE email = $1")
+                .bind(&email)
+                .fetch_one(&pool)
+                .await
+                .expect("successful sign-in resets failures");
+        assert_eq!(failures, 0);
+    }
+}
+
+async fn clear_code_cooldown_for_test(
+    state: &Arc<AppState>,
+    email: &str,
+    purpose: AccountCodePurpose,
+) {
+    let digest = hex::encode(Sha256::digest(email.as_bytes()));
+    let key = format!(
+        "colony:account-code-cooldown:{}:{digest}",
+        code_purpose_key(purpose)
+    );
+    let mut connection = state.redis_pool.get().await.expect("test Redis connection");
+    let _: i64 = redis::cmd("DEL")
+        .arg(key)
+        .query_async(&mut *connection)
+        .await
+        .expect("advance resend cooldown only");
+}
+
+async fn clear_email_rate_for_test(state: &Arc<AppState>, route: &str, email: &str) {
+    let mut hasher = Sha256::new();
+    hasher.update(b"email\0");
+    hasher.update(email.as_bytes());
+    let key = format!(
+        "colony:account-rate:{route}:{}",
+        hex::encode(hasher.finalize())
+    );
+    let mut connection = state.redis_pool.get().await.expect("test Redis connection");
+    let _: i64 = redis::cmd("DEL")
+        .arg(key)
+        .query_async(&mut *connection)
+        .await
+        .expect("isolate durable guessing limit from the minute HTTP limit");
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn account_routes_limit_fly_clients_independently_behind_one_proxy() {
+    let (mut state, _pool, host) = test_state(Vec::new(), None).await;
+    Arc::make_mut(
+        &mut Arc::get_mut(&mut state)
+            .expect("unshared test state")
+            .config,
+    )
+    .accounts
+    .trust_fly_client_ip = true;
+    let proxy = unique_test_ip();
+    let client = unique_test_ip();
+    for attempt in 0..=IP_RATE_LIMIT {
+        let mut request = request_with_ip(
+            "GET",
+            "/api/accounts/me",
+            &host,
+            proxy,
+            b"{}".to_vec(),
+            None,
+        );
+        request.headers_mut().insert(
+            "fly-client-ip",
+            client.to_string().parse().expect("client header"),
+        );
+        let response = crate::router::build_router(state.clone())
+            .oneshot(request)
+            .await
+            .expect("account middleware response");
+        if attempt == IP_RATE_LIMIT {
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        } else {
+            assert_ne!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
+    for real_client in [None, Some(unique_test_ip().to_string())] {
+        let mut request = request_with_ip(
+            "GET",
+            "/api/accounts/me",
+            &host,
+            proxy,
+            b"{}".to_vec(),
+            None,
+        );
+        if let Some(real_client) = real_client {
+            request.headers_mut().insert(
+                "fly-client-ip",
+                real_client.parse().expect("second client header"),
+            );
+        }
+        let response = crate::router::build_router(state.clone())
+            .oneshot(request)
+            .await
+            .expect("independent client response");
+        assert_ne!(
+            response.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "one Fly client must not exhaust the proxy or another client bucket"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn account_routes_ignore_forged_fly_addresses_on_a_direct_listener() {
+    let (state, _pool, host) = test_state(Vec::new(), None).await;
+    let peer = unique_test_ip();
+    for attempt in 0..=IP_RATE_LIMIT {
+        let mut request =
+            request_with_ip("GET", "/api/accounts/me", &host, peer, b"{}".to_vec(), None);
+        request.headers_mut().insert(
+            "fly-client-ip",
+            unique_test_ip().to_string().parse().expect("forged header"),
+        );
+        let response = crate::router::build_router(state.clone())
+            .oneshot(request)
+            .await
+            .expect("direct account middleware response");
+        if attempt == IP_RATE_LIMIT {
+            assert_eq!(
+                response.status(),
+                StatusCode::TOO_MANY_REQUESTS,
+                "rotating a forged header cannot reset the socket address bucket"
+            );
+        } else {
+            assert_ne!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn unknown_email_starts_have_a_global_cap_and_create_accounts_only_after_proof() {
+    let (mut state, pool, host) = test_state(Vec::new(), None).await;
+    Arc::make_mut(
+        &mut Arc::get_mut(&mut state)
+            .expect("unshared test state")
+            .config,
+    )
+    .accounts
+    .code_start_limit_per_hour = 2;
+    let emails: Vec<_> = (0..3)
+        .map(|_| format!("anonymous-code-{}@example.test", Uuid::new_v4().simple()))
+        .collect();
+    for email in &emails[..2] {
+        assert_eq!(
+            code_start(&state, &host, unique_test_ip(), email).await.0,
+            StatusCode::OK
+        );
+        assert!(state
+            .db
+            .account_by_email(email)
+            .await
+            .expect("pending account lookup")
+            .is_none());
+    }
+    let (limited_status, limited_body) =
+        code_start(&state, &host, unique_test_ip(), &emails[2]).await;
+    assert_eq!(limited_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(limited_body, json!({ "error": "rate_limited" }));
+    let blocked_rows: (i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM account_codes WHERE email = $1), (SELECT count(*) FROM account_mail_outbox WHERE recipient = $1)")
+        .bind(&emails[2]).fetch_one(&pool).await.expect("blocked start leaves no code or mail");
+    assert_eq!(blocked_rows, (0, 0));
+
+    deliver_pending_mail(&state).await;
+    let code = test_mail_code(&pool, &emails[0], "sign_in").await;
+    let (status, session) = code_verify(
+        &state,
+        &host,
+        unique_test_ip(),
+        json!({ "email": emails[0], "code": code, "termsVersion": "2026-10-11" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(session["created"], true);
+    let account = state
+        .db
+        .account_by_email(&emails[0])
+        .await
+        .expect("verified lookup")
+        .expect("proof creates the account");
+    let linked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM account_codes WHERE email = $1 AND account_id = $2",
+    )
+    .bind(&emails[0])
+    .bind(account.id)
+    .fetch_one(&pool)
+    .await
+    .expect("pending code bound atomically");
+    assert_eq!(linked, 1);
+    clear_sign_in_cooldown(&state, &emails[0]).await;
+    assert_eq!(
+        code_start(&state, &host, unique_test_ip(), &emails[0])
+            .await
+            .0,
+        StatusCode::TOO_MANY_REQUESTS,
+        "the cap responds uniformly for known and unknown emails"
+    );
+
+    sqlx::query("UPDATE account_codes SET expires_at = now() - interval '2 days' WHERE email = $1")
+        .bind(&emails[1])
+        .execute(&pool)
+        .await
+        .expect("expire the anonymous code");
+    state
+        .db
+        .claim_account_mail_outbox(1)
+        .await
+        .expect("production maintenance prunes expired anonymous state");
+    let retained: (i64, i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM account_codes WHERE email = $1), (SELECT count(*) FROM account_mail_outbox WHERE recipient = $1), (SELECT count(*) FROM account_test_mail WHERE recipient = $1)")
+        .bind(&emails[1]).fetch_one(&pool).await.expect("anonymous retention count");
+    assert_eq!(retained, (0, 0, 0));
+    let expired = code_verify(
+        &state,
+        &host,
+        unique_test_ip(),
+        json!({ "email": emails[1], "code": "123456", "termsVersion": "2026-10-11" }),
+    )
+    .await;
+    assert_eq!(expired.0, StatusCode::GONE);
+    assert!(state
+        .db
+        .account_by_email(&emails[1])
+        .await
+        .expect("expired account lookup")
+        .is_none());
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn email_code_sign_in_creates_a_passwordless_account_then_signs_it_in_again() {
+    let (state, pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let email = format!("code-{}@example.test", Uuid::new_v4().simple());
+
+    let (start_status, start_body) = code_start(&state, &host, ip, &email).await;
+    assert_eq!(start_status, StatusCode::OK);
+    assert_eq!(
+        start_body,
+        json!({ "sent": true, "resendAfterSeconds": ACCOUNT_CODE_RESEND_COOLDOWN_SECS })
+    );
+    let (again_status, again_body) = code_start(&state, &host, ip, &email).await;
+    assert_eq!(again_status, StatusCode::OK);
+    assert_eq!(again_body["sent"], true);
+    let wait = again_body["resendAfterSeconds"]
+        .as_i64()
+        .expect("resend wait in seconds");
+    assert!((1..=ACCOUNT_CODE_RESEND_COOLDOWN_SECS).contains(&wait));
+
+    deliver_pending_mail(&state).await;
+    assert_eq!(
+        test_mail_count(&pool, &email, "sign_in").await,
+        1,
+        "a resend inside the cooldown sends no second code"
+    );
+    let code = test_mail_code(&pool, &email, "sign_in").await;
+    let (verify_status, verify_body) = code_verify(
+        &state,
+        &host,
+        ip,
+        json!({
+            "email": email,
+            "code": code,
+            "termsVersion": "2026-10-11",
+            "displayName": "Lerato Mokoena",
+        }),
+    )
+    .await;
+    assert_eq!(verify_status, StatusCode::OK);
+    assert_eq!(verify_body["created"], true);
+    assert_eq!(verify_body["account"]["has_password"], false);
+    assert!(verify_body["nsec"]
+        .as_str()
+        .is_some_and(|nsec| nsec.starts_with("nsec1")));
+    let pubkey = verify_body["account"]["pubkey"]
+        .as_str()
+        .expect("session public key")
+        .to_owned();
+
+    let terms: (Option<String>, bool) = sqlx::query_as(
+        "SELECT terms_version, terms_accepted_at IS NOT NULL FROM accounts WHERE email = $1",
+    )
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("read recorded terms");
+    assert_eq!(terms, (Some("2026-10-11".to_owned()), true));
+
+    let community_id: Uuid = sqlx::query_scalar("SELECT id FROM communities WHERE host = $1")
+        .bind(&host)
+        .fetch_one(&pool)
+        .await
+        .expect("code sign-in community id");
+    let content: String = sqlx::query_scalar(
+        "SELECT content FROM events WHERE community_id = $1 AND pubkey = $2 AND kind = 0 \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(community_id)
+    .bind(hex::decode(&pubkey).expect("decode profile pubkey"))
+    .fetch_one(&pool)
+    .await
+    .expect("display name profile event");
+    assert_eq!(
+        serde_json::from_str::<Value>(&content).expect("profile content"),
+        json!({ "display_name": "Lerato Mokoena" })
+    );
+
+    clear_sign_in_cooldown(&state, &email).await;
+    let (_, second_start) = code_start(&state, &host, ip, &email).await;
+    assert_eq!(second_start["sent"], true);
+    deliver_pending_mail(&state).await;
+    let second_code = test_mail_code(&pool, &email, "sign_in").await;
+    let (second_status, second_body) = code_verify(
+        &state,
+        &host,
+        ip,
+        json!({ "email": email, "code": second_code, "termsVersion": "2026-11-01" }),
+    )
+    .await;
+    assert_eq!(second_status, StatusCode::OK);
+    assert_eq!(second_body["created"], false);
+    assert_eq!(
+        second_body["account"]["pubkey"].as_str(),
+        Some(pubkey.as_str())
+    );
+    let terms_version: Option<String> =
+        sqlx::query_scalar("SELECT terms_version FROM accounts WHERE email = $1")
+            .bind(&email)
+            .fetch_one(&pool)
+            .await
+            .expect("read updated terms");
+    assert_eq!(terms_version.as_deref(), Some("2026-11-01"));
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn email_code_sign_in_does_not_reveal_accounts_and_burns_a_guessed_code() {
+    let (state, pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let known = format!("known-{}@example.test", Uuid::new_v4().simple());
+    let unknown = format!("unknown-{}@example.test", Uuid::new_v4().simple());
+
+    let _ = code_start(&state, &host, ip, &known).await;
+    deliver_pending_mail(&state).await;
+    let known_code = test_mail_code(&pool, &known, "sign_in").await;
+    let (made_status, _) = code_verify(
+        &state,
+        &host,
+        ip,
+        json!({ "email": known, "code": known_code, "termsVersion": "2026-10-11" }),
+    )
+    .await;
+    assert_eq!(made_status, StatusCode::OK);
+    clear_sign_in_cooldown(&state, &known).await;
+
+    let known_answer = code_start(&state, &host, ip, &known).await;
+    let unknown_answer = code_start(&state, &host, ip, &unknown).await;
+    assert_eq!(
+        known_answer, unknown_answer,
+        "a known email and an unknown email get the same answer"
+    );
+    assert_eq!(
+        unknown_answer.1,
+        json!({ "sent": true, "resendAfterSeconds": ACCOUNT_CODE_RESEND_COOLDOWN_SECS })
+    );
+
+    deliver_pending_mail(&state).await;
+    let code = test_mail_code(&pool, &unknown, "sign_in").await;
+    let wrong = wrong_test_code(&code);
+    for attempts_left in [4, 3, 2, 1] {
+        let (status, body) = code_verify(
+            &state,
+            &host,
+            ip,
+            json!({ "email": unknown, "code": wrong, "termsVersion": "2026-10-11" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body,
+            json!({ "error": "invalid_code", "attempts_left": attempts_left })
+        );
+    }
+    let (fifth_status, fifth_body) = code_verify(
+        &state,
+        &host,
+        ip,
+        json!({ "email": unknown, "code": wrong, "termsVersion": "2026-10-11" }),
+    )
+    .await;
+    assert_eq!(fifth_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(fifth_body["error"], "too_many_attempts");
+    let (burned_status, burned_body) = code_verify(
+        &state,
+        &host,
+        ip,
+        json!({ "email": unknown, "code": code, "termsVersion": "2026-10-11" }),
+    )
+    .await;
+    assert_eq!(
+        burned_status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "a burned code never works, even when it is right"
+    );
+    assert_eq!(burned_body["error"], "too_many_attempts");
+
+    clear_sign_in_cooldown(&state, &unknown).await;
+    let (locked_status, locked_body) = code_start(&state, &host, ip, &unknown).await;
+    assert_eq!(locked_status, StatusCode::OK);
+    assert_eq!(locked_body["sent"], true);
+    assert!(
+        locked_body["resendAfterSeconds"]
+            .as_i64()
+            .unwrap_or_default()
+            > ACCOUNT_CODE_RESEND_COOLDOWN_SECS,
+        "no new code until the burned one expires"
+    );
+    deliver_pending_mail(&state).await;
+    assert_eq!(
+        test_mail_count(&pool, &unknown, "sign_in").await,
+        0,
+        "burning the code deletes its outbox and cascades the delivered test mail"
+    );
+    let (code_count, burned_count, outbox_count): (i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+         (SELECT count(*) FROM account_codes c WHERE c.email = $1 AND c.purpose = 'sign_in'), \
+         (SELECT count(*) FROM account_codes c WHERE c.email = $1 AND c.purpose = 'sign_in' \
+          AND c.attempts = 5 AND c.consumed_at IS NOT NULL), \
+         (SELECT count(*) FROM account_mail_outbox o WHERE o.recipient = $1 AND o.purpose = 'sign_in')",
+    )
+    .bind(&unknown)
+    .fetch_one(&pool)
+    .await
+    .expect("read burned code and locked resend state");
+    assert_eq!(
+        (code_count, burned_count, outbox_count),
+        (1, 1, 0),
+        "a locked resend retains the burned code without issuing a new code or mail"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn email_code_routes_reject_bad_input_and_respect_the_email_limit() {
+    let (state, _pool, host) = test_state(Vec::new(), None).await;
+    let ip = unique_test_ip();
+    let email = format!("limits-{}@example.test", Uuid::new_v4().simple());
+
+    let (bad_email_status, bad_email_body) = code_start(&state, &host, ip, "not-an-email").await;
+    assert_eq!(bad_email_status, StatusCode::BAD_REQUEST);
+    assert_eq!(bad_email_body, json!({ "error": "invalid_request" }));
+
+    let (no_code_status, no_code_body) = code_verify(
+        &state,
+        &host,
+        ip,
+        json!({ "email": email, "code": "123456", "termsVersion": "2026-10-11" }),
+    )
+    .await;
+    assert_eq!(no_code_status, StatusCode::GONE);
+    assert_eq!(no_code_body, json!({ "error": "code_expired" }));
+
+    let (malformed_status, malformed_body) = code_verify(
+        &state,
+        &host,
+        ip,
+        json!({ "email": email, "code": "12ab", "termsVersion": "2026-10-11" }),
+    )
+    .await;
+    assert_eq!(malformed_status, StatusCode::BAD_REQUEST);
+    assert_eq!(malformed_body, json!({ "error": "invalid_code" }));
+
+    let (missing_terms_status, missing_terms_body) = code_verify(
+        &state,
+        &host,
+        ip,
+        json!({ "email": email, "code": "123456" }),
+    )
+    .await;
+    assert_eq!(missing_terms_status, StatusCode::BAD_REQUEST);
+    assert_eq!(missing_terms_body, json!({ "error": "invalid_request" }));
+
+    let (long_terms_status, _) = code_verify(
+        &state,
+        &host,
+        ip,
+        json!({ "email": email, "code": "123456", "termsVersion": "x".repeat(65) }),
+    )
+    .await;
+    assert_eq!(long_terms_status, StatusCode::BAD_REQUEST);
+
+    for _ in 0..10 {
+        let (status, _) = code_start(&state, &host, ip, &email).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (limited_status, limited_body) = code_start(&state, &host, ip, &email).await;
+    assert_eq!(limited_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(limited_body["error"], "rate_limited");
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn first_code_and_google_sign_ins_replace_a_key_claimed_before_email_proof() {
+    let (jwks_url, server) = fake_google_jwks().await;
+    let (state, pool, host) =
+        test_state(vec![TEST_GOOGLE_AUDIENCE.to_owned()], Some(jwks_url)).await;
+    for use_google in [false, true] {
+        let ip = unique_test_ip();
+        let email = format!(
+            "claimed-first-proof-{}@example.test",
+            Uuid::new_v4().simple()
+        );
+        let attacker = Keys::generate();
+        let claimed_nsec = attacker
+            .secret_key()
+            .to_bech32()
+            .expect("test claim secret");
+        let (claim_status, _) = json_response(
+            call(
+                state.clone(),
+                "POST",
+                "/api/accounts/claim",
+                &host,
+                ip,
+                json!({ "email": email, "password": "unproven-claim-password", "nsec": claimed_nsec }),
+                Some(&attacker),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(claim_status, StatusCode::ACCEPTED);
+        let claimed = state
+            .db
+            .account_by_email(&email)
+            .await
+            .expect("claimed row")
+            .expect("claim exists");
+        assert_eq!(claimed.pubkey, attacker.public_key().to_hex());
+        assert!(claimed.email_verified_at.is_none());
+
+        let (status, session) = if use_google {
+            json_response(call(
+                state.clone(), "POST", "/api/accounts/google", &host, ip,
+                json!({ "id_token": google_token(&email, &format!("sub-{}", Uuid::new_v4().simple())), "termsVersion": "2026-10-11" }),
+                None,
+            ).await).await
+        } else {
+            assert_eq!(
+                code_start(&state, &host, ip, &email).await.0,
+                StatusCode::OK
+            );
+            deliver_pending_mail(&state).await;
+            let code = test_mail_code(&pool, &email, "sign_in").await;
+            code_verify(&state, &host, ip, json!({ "email": email, "code": code, "termsVersion": "2026-10-11", "displayName": "Verified owner" })).await
+        };
+        assert_eq!(status, StatusCode::OK);
+        assert!(session["nsec"]
+            .as_str()
+            .is_some_and(|value| value != claimed_nsec));
+        let pubkey = session["account"]["pubkey"]
+            .as_str()
+            .expect("verified public key");
+        assert_ne!(pubkey, attacker.public_key().to_hex());
+        assert_eq!(session["account"]["has_password"], false);
+        if !use_google {
+            assert_eq!(session["created"], true);
+            let profile_count: i64 = sqlx::query_scalar("SELECT count(*) FROM events WHERE kind = 0 AND pubkey = $1 AND content::jsonb->>'display_name' = 'Verified owner'")
+                .bind(hex::decode(pubkey).expect("profile public key"))
+                .fetch_one(&pool).await.expect("profile belongs to the fresh key");
+            assert_eq!(profile_count, 1);
+        }
+        let (password_status, _) = json_response(
+            call(
+                state.clone(),
+                "POST",
+                "/api/accounts/signin",
+                &host,
+                ip,
+                json!({ "email": email, "password": "unproven-claim-password" }),
+                None,
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(password_status, StatusCode::UNAUTHORIZED);
+    }
+    server.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres and Redis"]
+async fn google_sign_in_records_terms_and_drops_a_password_nobody_proved() {
+    let (jwks_url, server) = fake_google_jwks().await;
+    let (state, pool, host) =
+        test_state(vec![TEST_GOOGLE_AUDIENCE.to_owned()], Some(jwks_url)).await;
+    let ip = unique_test_ip();
+
+    let squatted = format!("prehijack-{}@example.test", Uuid::new_v4().simple());
+    let squatter_password = "squatter-passphrase";
+    let (signup_status, _) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/signup",
+            &host,
+            ip,
+            json!({ "email": squatted, "password": squatter_password }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(signup_status, StatusCode::ACCEPTED);
+    let (google_status, google_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/google",
+            &host,
+            ip,
+            json!({
+                "id_token": google_token(&squatted, &format!("sub-{}", Uuid::new_v4().simple())),
+                "termsVersion": "2026-10-11",
+            }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(google_status, StatusCode::OK);
+    assert_eq!(google_body["account"]["has_password"], false);
+    let (squatter_status, _) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/signin",
+            &host,
+            ip,
+            json!({ "email": squatted, "password": squatter_password }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        squatter_status,
+        StatusCode::UNAUTHORIZED,
+        "the squatter's password must not sign in after the owner proved the email"
+    );
+    let terms_version: Option<String> =
+        sqlx::query_scalar("SELECT terms_version FROM accounts WHERE email = $1")
+            .bind(&squatted)
+            .fetch_one(&pool)
+            .await
+            .expect("read Google terms");
+    assert_eq!(terms_version.as_deref(), Some("2026-10-11"));
+
+    let owned = format!("linked-{}@example.test", Uuid::new_v4().simple());
+    let (owner_signup, _) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/signup",
+            &host,
+            ip,
+            json!({ "email": owned, "password": "owner-passphrase" }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(owner_signup, StatusCode::ACCEPTED);
+    deliver_pending_mail(&state).await;
+    let verification_code = test_mail_code(&pool, &owned, "verify_email").await;
+    let (verify_status, _) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/verify",
+            &host,
+            ip,
+            json!({ "email": owned, "code": verification_code }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(verify_status, StatusCode::OK);
+    let (linked_status, linked_body) = json_response(
+        call(
+            state.clone(),
+            "POST",
+            "/api/accounts/google",
+            &host,
+            ip,
+            json!({ "id_token": google_token(&owned, &format!("sub-{}", Uuid::new_v4().simple())) }),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(linked_status, StatusCode::OK);
+    assert_eq!(
+        linked_body["account"]["has_password"], true,
+        "a password proven by its own email verification stays"
+    );
+    let owner_terms: Option<String> =
+        sqlx::query_scalar("SELECT terms_version FROM accounts WHERE email = $1")
+            .bind(&owned)
+            .fetch_one(&pool)
+            .await
+            .expect("read owner terms");
+    assert_eq!(
+        owner_terms, None,
+        "no terms version is recorded when none was sent"
+    );
+    server.abort();
+}

@@ -1,0 +1,38 @@
+{
+  "name": "colony-os-design",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4317",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4317",
+    "verify": "node scripts/verify.mjs",
+    "verify:conversations": "node scripts/verify-conversations.mjs",
+    "export": "node scripts/export.mjs",
+    "coverage": "node scripts/coverage.mjs",
+    "export:assets": "node scripts/export-assets.mjs",
+    "verify:contrast": "node scripts/contrast.mjs",
+    "verify:review": "node scripts/review-surfaces.mjs",
+    "verify:team": "node scripts/verify-team.mjs",
+    "verify:desks": "node scripts/verify-desks.mjs",
+    "verify:settings": "node scripts/verify-settings.mjs",
+    "verify:first-run": "node scripts/verify-first-run.mjs",
+    "verify:remaining-cards": "node scripts/verify-remaining-cards.mjs",
+    "verify:system-outside": "node scripts/verify-system-outside.mjs"
+  },
+  "dependencies": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "lucide-react": "0.468.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "@vitejs/plugin-react": "4.4.1",
+    "typescript": "5.8.3",
+    "vite": "6.3.5",
+    "playwright": "1.62.1",
+    "axe-core": "4.10.3"
+  }
+}

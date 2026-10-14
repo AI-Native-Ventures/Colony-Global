@@ -1,0 +1,2979 @@
+import { hexToBytes } from "@noble/hashes/utils.js";
+import { expect, test, type Page } from "@playwright/test";
+import { nsecEncode, npubEncode } from "nostr-tools/nip19";
+
+import {
+  installMockBridge,
+  openChannelBrowser,
+  TEST_IDENTITIES,
+} from "../helpers/bridge";
+import { expectEmojiMartStylesInstalled } from "../helpers/css";
+import {
+  invokeMockCommand,
+  publishWelcomeTeamPresence,
+  waitForWelcomeTeam,
+} from "../helpers/welcomeTeam";
+import { installFakeCamera } from "../helpers/fakeCamera";
+import {
+  E2E_IDENTITY_OVERRIDE_STORAGE_KEY,
+  completeR17BusinessSetup,
+  openR17BusinessSetup,
+  R17_BUSINESS_PROFILE_KEY,
+  r17Runtime,
+  seedActiveIdentity,
+  startR17AccountAuth,
+} from "../helpers/onboarding";
+
+type RelayConnectionState =
+  | "connected"
+  | "connecting"
+  | "disconnected"
+  | "idle"
+  | "reconnecting"
+  | "stalled";
+
+async function openOwnedCommunityReconnect(page: Page) {
+  await page.getByTestId("community-choice-existing").click();
+  await page.getByTestId("existing-choice-owner").click();
+}
+
+/**
+ * Drive the mock relay connection state via the E2E bridge seam.
+ * When targeting a degraded state, waits for baseline "connected" first so
+ * the mock auth handshake can't race the override back to "connected".
+ */
+async function setRelayConnectionState(
+  page: Page,
+  state: RelayConnectionState,
+) {
+  await page.waitForFunction(
+    () =>
+      typeof (
+        window as Window & {
+          __BUZZ_E2E_SET_RELAY_CONNECTION_STATE__?: unknown;
+        }
+      ).__BUZZ_E2E_SET_RELAY_CONNECTION_STATE__ === "function",
+  );
+  await page.evaluate((nextState) => {
+    const testWindow = window as Window & {
+      __BUZZ_E2E_SET_RELAY_CONNECTION_STATE__?: (
+        state: RelayConnectionState,
+      ) => void;
+    };
+    const setConnectionState =
+      testWindow.__BUZZ_E2E_SET_RELAY_CONNECTION_STATE__;
+    if (!setConnectionState) {
+      throw new Error("Mock relay connection state helper is not installed.");
+    }
+    // Open-relay onboarding may not start a socket before the test exercises
+    // connectivity UI. Establish the same connected baseline explicitly so a
+    // delayed mock handshake cannot overwrite the degraded state.
+    if (nextState !== "connected") {
+      setConnectionState("connected");
+    }
+    setConnectionState(nextState);
+  }, state);
+}
+
+const HOME_SEEN_STORAGE_KEY_PREFIX = "buzz-home-feed-seen.v1:";
+const COMMUNITY_ONBOARDING_TRANSACTION_STORAGE_KEY =
+  "buzz-community-onboarding-transaction.v1";
+const ONE_PIXEL_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+const DEFAULT_MOCK_PUBKEY = "deadbeef".repeat(8);
+const BLANK_TYLER_IDENTITY = {
+  ...TEST_IDENTITIES.tyler,
+  username: "",
+};
+const BLANK_AVATAR_PLACEHOLDER_IDENTITY = {
+  ...TEST_IDENTITIES.tyler,
+  pubkey: "1".repeat(64),
+  username: "",
+};
+const BLANK_AVATAR_EMOJI_IDENTITY = {
+  ...TEST_IDENTITIES.tyler,
+  pubkey: "2".repeat(64),
+  username: "",
+};
+const FIRST_RUN_ALICE = {
+  ...TEST_IDENTITIES.alice,
+  username: "",
+};
+
+async function commandCount(page: Page, command: string) {
+  return page.evaluate((commandName) => {
+    const bridgeWindow = window as Window & {
+      __BUZZ_E2E_COMMAND_PAYLOADS__?: Array<{ command: string }>;
+    };
+    return (
+      bridgeWindow.__BUZZ_E2E_COMMAND_PAYLOADS__?.filter(
+        (entry) => entry.command === commandName,
+      ).length ?? 0
+    );
+  }, command);
+}
+
+async function seedOnboardingCompletion(page: Page, pubkey: string) {
+  await page.addInitScript(
+    ({ storageKey }) => {
+      window.localStorage.setItem(storageKey, "true");
+    },
+    {
+      storageKey: `buzz-onboarding-complete.v1:${pubkey}`,
+    },
+  );
+}
+
+async function seedCommunityProfileStage(page: Page, id: string) {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript(
+    ({ pubkey, transactionId, transactionStorageKey }) => {
+      window.localStorage.setItem(
+        `buzz-machine-onboarding-complete.v2:${pubkey}`,
+        "true",
+      );
+      const timestamp = new Date().toISOString();
+      window.localStorage.setItem(
+        transactionStorageKey,
+        JSON.stringify({
+          id: transactionId,
+          source: "first-community",
+          stage: "profile",
+          relayUrl: "wss://default.example.com",
+          communityName: "Default",
+          communityId: "e2e-default-community",
+          addedCommunity: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }),
+      );
+    },
+    {
+      pubkey: BLANK_TYLER_IDENTITY.pubkey,
+      transactionId: id,
+      transactionStorageKey: COMMUNITY_ONBOARDING_TRANSACTION_STORAGE_KEY,
+    },
+  );
+}
+
+async function uploadCommunityAvatar(page: Page, filename: string) {
+  await page.getByTestId("community-avatar-open").click();
+  await page.getByTestId("community-avatar-input").setInputFiles({
+    buffer: Buffer.from(ONE_PIXEL_PNG_BASE64, "base64"),
+    mimeType: "image/png",
+    name: filename,
+  });
+  await page.getByTestId("community-avatar-done").click();
+}
+
+async function readHomeSeenStorageKeys(page: Page) {
+  return page.evaluate((prefix) => {
+    return Object.keys(window.localStorage).filter((key) =>
+      key.startsWith(prefix),
+    );
+  }, HOME_SEEN_STORAGE_KEY_PREFIX);
+}
+
+async function expectNoHomeSeenEntries(page: Page) {
+  await expect.poll(async () => readHomeSeenStorageKeys(page)).toEqual([]);
+}
+
+async function selectFirstEmojiFromPicker(page: Page) {
+  const picker = page.locator("em-emoji-picker");
+  await expect(picker).toBeVisible();
+  await expect
+    .poll(() =>
+      picker.evaluate((element) =>
+        Boolean(element.shadowRoot?.querySelector(".scroll button")),
+      ),
+    )
+    .toBe(true);
+  await picker.evaluate((element) => {
+    const button = element.shadowRoot?.querySelector(".scroll button");
+    if (!(button instanceof HTMLElement)) {
+      throw new Error("Emoji picker did not render an emoji button.");
+    }
+    button.click();
+  });
+}
+
+async function expectShellHidden(page: Page) {
+  await expect(page.getByTestId("app-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("chat-title")).toHaveCount(0);
+}
+
+async function expectHomeView(page: Page) {
+  await expect(page.getByTestId("home-inbox-list")).toBeVisible();
+}
+
+async function expectWiderThanTall(locator: Locator) {
+  const box = await locator.boundingBox();
+  if (!box) {
+    throw new Error("Could not measure welcome intro action card");
+  }
+
+  expect(box.width).toBeGreaterThan(box.height);
+}
+
+async function expectIntroActionIconStackedAboveTitle(
+  action: Locator,
+  title: string,
+) {
+  const iconBox = await action.locator("svg").first().boundingBox();
+  const titleBox = await action.getByText(title, { exact: true }).boundingBox();
+  if (!iconBox || !titleBox) {
+    throw new Error("Could not measure welcome intro action content");
+  }
+
+  expect(titleBox.y).toBeGreaterThan(iconBox.y + iconBox.height);
+}
+
+async function expectWelcomeComposerBannerLayout(page: Page) {
+  const banner = page.getByTestId("welcome-composer-guide-banner");
+  const personaMention = page.getByTestId("welcome-composer-persona-mention");
+  const composer = page.getByTestId("message-composer");
+  const bannerBox = await banner.boundingBox();
+  const personaMentionBox = await personaMention.boundingBox();
+  const composerBox = await composer.boundingBox();
+  const dockBackdropBox = await page
+    .getByTestId("composer-dock-backdrop")
+    .locator("div")
+    .boundingBox();
+  const guidanceLayer = page.getByTestId("welcome-composer-guidance-layer");
+  const guidanceLayerBox = await guidanceLayer.boundingBox();
+  const guidanceBackdrop = page.getByTestId(
+    "welcome-composer-guidance-backdrop",
+  );
+  const guidanceBackdropBox = await guidanceBackdrop.boundingBox();
+
+  if (
+    !bannerBox ||
+    !personaMentionBox ||
+    !composerBox ||
+    !dockBackdropBox ||
+    !guidanceLayerBox ||
+    !guidanceBackdropBox
+  ) {
+    throw new Error("Could not measure welcome composer banner layout");
+  }
+
+  expect(
+    await composer.getByTestId("welcome-composer-guide-banner").count(),
+  ).toBe(0);
+  expect(bannerBox.y).toBeLessThan(composerBox.y);
+  // Banner is in normal flow above the composer, no overlap.
+  expect(bannerBox.y + bannerBox.height).toBeLessThanOrEqual(composerBox.y);
+  // The dock backdrop is absolute inset-y-0 inside composer-dock, which now
+  // contains the guidance layer + composer in flow, so its top aligns with the
+  // guidance layer top (not the composer top).
+  expect(Math.abs(dockBackdropBox.y - guidanceLayerBox.y)).toBeLessThanOrEqual(
+    1,
+  );
+  expect(guidanceBackdropBox.y).toBeLessThanOrEqual(bannerBox.y);
+  // The guidance backdrop extends bottom-3 (12px) short of the banner's bottom,
+  // visually connecting up to the composer.
+  expect(guidanceBackdropBox.y + guidanceBackdropBox.height).toBeLessThan(
+    composerBox.y,
+  );
+  expect(
+    await page
+      .getByTestId("channel-composer-overlay")
+      .getByTestId("welcome-composer-guidance-layer")
+      .count(),
+  ).toBe(1);
+  expect(
+    await page
+      .getByTestId("composer-dock-backdrop")
+      .getByTestId("welcome-composer-guidance-layer")
+      .count(),
+  ).toBe(0);
+
+  const radii = await banner.evaluate((element) => {
+    const styles = window.getComputedStyle(element);
+    return {
+      backdropFilter: styles.backdropFilter,
+      backgroundColor: styles.backgroundColor,
+      bottomLeft: styles.borderBottomLeftRadius,
+      bottomRight: styles.borderBottomRightRadius,
+      filter: styles.filter,
+      zIndex: styles.zIndex,
+      topLeft: styles.borderTopLeftRadius,
+      topRight: styles.borderTopRightRadius,
+      transform: styles.transform,
+      willChange: styles.willChange,
+    };
+  });
+  const composerBackgroundColor = await composer.evaluate(
+    (element) => window.getComputedStyle(element).backgroundColor,
+  );
+  const dockBackdropFilter = await page
+    .getByTestId("composer-dock-backdrop")
+    .locator("div")
+    .evaluate((element) => window.getComputedStyle(element).backdropFilter);
+  const guidanceBackdropFilter = await guidanceBackdrop.evaluate(
+    (element) => window.getComputedStyle(element).backdropFilter,
+  );
+
+  expect(radii.topLeft).toBe(radii.topRight);
+  expect(radii.bottomLeft).toBe("0px");
+  expect(radii.bottomRight).toBe("0px");
+  expect(radii.backdropFilter).toBe("none");
+  expect(radii.backgroundColor).not.toBe(composerBackgroundColor);
+  expect(dockBackdropFilter).not.toBe("none");
+  expect(guidanceBackdropFilter).toBe(dockBackdropFilter);
+  expect(radii.filter).toBe("none");
+  expect(radii.transform).toBe("none");
+  expect(radii.willChange).toBe("auto");
+  expect(radii.zIndex).toBe("1");
+  expect(personaMentionBox.width).toBeGreaterThan(0);
+}
+
+async function expectWelcomePersonaMention(page: Page) {
+  const banner = page.getByTestId("welcome-composer-guide-banner");
+  const personaMention = page.getByTestId("welcome-composer-persona-mention");
+  await expect(personaMention).toBeVisible();
+  await expect(personaMention).toHaveAttribute("data-persona-options", "Scout");
+  await expect(personaMention).toHaveAttribute("data-active-persona", "Scout");
+  await expect(personaMention).toHaveAttribute(
+    "data-animation-target",
+    "per-character",
+  );
+
+  const activePersona = await personaMention.getAttribute(
+    "data-active-persona",
+  );
+  expect(activePersona).not.toBeNull();
+  await expect(personaMention).toContainText(`@${activePersona}`);
+  expect(
+    await personaMention
+      .getByTestId("welcome-composer-persona-character")
+      .count(),
+  ).toBeGreaterThanOrEqual(4);
+  expect(
+    await personaMention
+      .getByTestId("welcome-composer-persona-character")
+      .first()
+      .evaluate((element) => window.getComputedStyle(element).filter),
+  ).toBe("none");
+
+  const transition = await personaMention.evaluate((element) => {
+    const styles = window.getComputedStyle(element);
+    const durationMs = Number(
+      element.getAttribute("data-width-animation-duration-ms"),
+    );
+    return {
+      duration: styles.transitionDuration,
+      durationMs,
+      property: styles.transitionProperty,
+    };
+  });
+  expect(transition.durationMs).toBeGreaterThanOrEqual(700);
+  expect(transition.durationMs).toBeLessThanOrEqual(740);
+  expect(Math.round(Number.parseFloat(transition.duration) * 1000)).toBe(
+    transition.durationMs,
+  );
+  expect(transition.property).toContain("width");
+
+  const alignment = await personaMention.evaluate((element) => {
+    const mentionStyles = window.getComputedStyle(element);
+    const bannerStyles = window.getComputedStyle(
+      element.closest('[data-testid="welcome-composer-guide-banner"]') ??
+        element,
+    );
+    return {
+      display: mentionStyles.display,
+      lineHeightMatchesBanner:
+        mentionStyles.lineHeight === bannerStyles.lineHeight,
+      verticalAlign: mentionStyles.verticalAlign,
+    };
+  });
+  expect(alignment.display).toBe("inline-block");
+  expect(alignment.verticalAlign).toBe("baseline");
+  expect(alignment.lineHeightMatchesBanner).toBe(true);
+  await expect(banner).toContainText("Mention");
+}
+
+async function expectPrivateWelcomeLanding(page: Page) {
+  await expect(page).toHaveURL(/#\/channels\/[^/?#]+$/);
+  await expect(page.getByTestId("channel-Welcome")).toBeVisible();
+  await expect(page.getByTestId("chat-title")).toContainText("Welcome");
+}
+
+async function expectWelcomeView(page: Page) {
+  await expectPrivateWelcomeLanding(page);
+  await expect(page.getByTestId("channel-general")).toBeVisible();
+  await expect(page.getByTestId("channel-welcome-everyone")).toBeVisible();
+  await expect(page.getByTestId("channel-ephemeral-Welcome")).toHaveCount(0);
+  await expect(page.getByTestId("chat-ephemeral-badge")).toHaveCount(0);
+  await expect(page.getByTestId("message-unread-pill")).toHaveCount(0);
+  await expect(page.getByTestId("message-channel-intro")).toBeVisible();
+  await expect(page.getByTestId("message-channel-intro")).toContainText(
+    "private welcome channel",
+  );
+  await expect(
+    page.getByTestId("message-channel-intro").getByRole("button"),
+  ).toHaveText(["Browse channels", "Create a channel", "Create an agent"]);
+  await expect(
+    page.getByTestId("welcome-intro-action-browse-channels"),
+  ).toBeVisible();
+  await expectWiderThanTall(
+    page.getByTestId("welcome-intro-action-browse-channels"),
+  );
+  await expectIntroActionIconStackedAboveTitle(
+    page.getByTestId("welcome-intro-action-browse-channels"),
+    "Browse channels",
+  );
+  await page.getByTestId("welcome-intro-action-browse-channels").click();
+  await expect(page.getByTestId("channel-browser-dialog")).toBeVisible();
+  await expect(page.getByTestId("channel-browser-search")).toBeFocused();
+  await expect(page.getByRole("tab", { name: "All channels" })).toHaveAttribute(
+    "data-state",
+    "active",
+  );
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("channel-browser-dialog")).toHaveCount(0);
+  await expect(
+    page.getByTestId("welcome-intro-action-create-channel"),
+  ).toBeVisible();
+  await expectWiderThanTall(
+    page.getByTestId("welcome-intro-action-create-channel"),
+  );
+  await expectIntroActionIconStackedAboveTitle(
+    page.getByTestId("welcome-intro-action-create-channel"),
+    "Create a channel",
+  );
+  await expect(
+    page
+      .getByTestId("welcome-intro-action-create-channel")
+      .getByText("Create a channel", { exact: true }),
+  ).toHaveCSS("white-space", "normal");
+  await expect(
+    page.getByTestId("welcome-intro-action-create-agent"),
+  ).toBeVisible();
+  await expectWiderThanTall(
+    page.getByTestId("welcome-intro-action-create-agent"),
+  );
+  await expectIntroActionIconStackedAboveTitle(
+    page.getByTestId("welcome-intro-action-create-agent"),
+    "Create an agent",
+  );
+  await expect(page.getByTestId("message-composer")).toBeVisible();
+  // Measure the empty-channel intro before presence releases the live kickoff.
+  // Its message arrival can remount the timeline while bounding boxes are read.
+  await publishWelcomeTeamPresence(page);
+  await expect(page.getByTestId("welcome-composer-guide-banner")).toBeVisible();
+  await expect(page.getByTestId("welcome-composer-guide-banner")).toContainText(
+    "Mention",
+  );
+  await expect(page.getByTestId("welcome-composer-guide-banner")).toContainText(
+    "whenever you want their help.",
+  );
+  await expectWelcomePersonaMention(page);
+  await expectWelcomeComposerBannerLayout(page);
+}
+
+async function expectWelcomeComposerBannerCompletesAfterPersonaMention(
+  page: Page,
+) {
+  const banner = page.getByTestId("welcome-composer-guide-banner");
+  const channelIntro = page.getByTestId("message-channel-intro");
+  const composer = page.getByTestId("message-composer");
+  const initialComposerBox = await composer.boundingBox();
+  if (!initialComposerBox) {
+    throw new Error("Could not measure the Welcome composer");
+  }
+
+  // The fixture has a seeded Scout and this new member's starter Scout. A
+  // manually typed name cannot choose between them or complete onboarding.
+  const input = page.getByTestId("message-input");
+  const content = "Thanks @Scout";
+  const sentRecipients = () =>
+    page.evaluate(
+      (content) =>
+        (window.__BUZZ_E2E_SIGNED_EVENTS__ ?? [])
+          .filter((event) => event.content.trim() === content)
+          .map((event) =>
+            event.tags.filter((tag) => tag[0] === "p").map((tag) => tag[1]),
+          ),
+      content,
+    );
+  await input.fill(content);
+  await input.press("Escape");
+  await page.getByTestId("send-message").click();
+  await expect(
+    page.getByText("The mention @Scout is ambiguous.", { exact: false }),
+  ).toBeVisible();
+  await expect(input).toHaveText(content);
+  await expect(banner).toHaveAttribute("data-state", "prompt");
+  expect(await sentRecipients()).toEqual([]);
+
+  const agents = await invokeMockCommand<
+    Array<{ pubkey: string; persona_id: string | null; status: string }>
+  >(page, "list_managed_agents");
+  const sameNameAgents = agents.filter(
+    (agent) => agent.persona_id === "builtin:fizz",
+  );
+  expect(sameNameAgents).toHaveLength(2);
+  // Onboarding starts the new member's starter; the pre-existing mock stays
+  // stopped. This identifies the fixture key, not a production routing rule.
+  const fizz = sameNameAgents.filter((agent) => agent.status === "running");
+  expect(fizz).toHaveLength(1);
+  // Make selection intent explicit; do not remove the colliding fixture or
+  // relax extraction. The resulting event must tag only our starter identity.
+  await input.fill("");
+  await input.fill(content);
+  await page.getByTestId(`mention-suggestion-${fizz[0].pubkey}`).click();
+  await page.getByTestId("send-message").click();
+  await expect.poll(sentRecipients).toEqual([[fizz[0].pubkey]]);
+
+  await expect(banner).toHaveAttribute("data-state", "complete");
+  await expect(banner).toHaveAttribute("data-tone", "success");
+  await expect(
+    banner.getByTestId("welcome-composer-complete-icon"),
+  ).toBeVisible();
+  await expect(
+    banner.locator('[data-animation-target="success-icon"]'),
+  ).toBeVisible();
+  await expect(
+    banner.locator('[data-animation-target="success-copy"]'),
+  ).toBeVisible();
+  await expect(banner).toContainText("Nice work.");
+  await expect(banner).not.toContainText("Try mentioning");
+  await expect(channelIntro).toBeVisible();
+  const completeComposerBox = await composer.boundingBox();
+  expect(completeComposerBox).not.toBeNull();
+  expect(
+    Math.abs((completeComposerBox?.y ?? 0) - initialComposerBox.y),
+  ).toBeLessThanOrEqual(1);
+  await expect(banner).toHaveCount(0, { timeout: 6_000 });
+  const hiddenComposerBox = await composer.boundingBox();
+  expect(hiddenComposerBox).not.toBeNull();
+  expect(
+    Math.abs((hiddenComposerBox?.y ?? 0) - initialComposerBox.y),
+  ).toBeLessThanOrEqual(1);
+}
+
+async function getMockChannels(page: Page) {
+  return page.evaluate(async () => {
+    const bridgeWindow = window as Window & {
+      __BUZZ_E2E_INVOKE_MOCK_COMMAND__?: (
+        command: string,
+        payload?: Record<string, unknown>,
+      ) => Promise<unknown>;
+      __TAURI_INTERNALS__?: {
+        invoke?: (
+          command: string,
+          payload?: Record<string, unknown>,
+        ) => Promise<unknown>;
+      };
+    };
+    const invoke =
+      bridgeWindow.__BUZZ_E2E_INVOKE_MOCK_COMMAND__ ??
+      bridgeWindow.__TAURI_INTERNALS__?.invoke;
+
+    if (!invoke) {
+      throw new Error("Mock invoke bridge is unavailable.");
+    }
+
+    const payload = (await invoke("get_channels")) as {
+      channels: Array<{
+        id: string;
+        name: string;
+        channel_type: string;
+        visibility: "open" | "private";
+        member_count: number;
+        is_member: boolean;
+        ttl_seconds: number | null;
+      }> | null;
+    };
+    return payload.channels ?? [];
+  });
+}
+
+async function seedCurrentAvatar(page: Page, avatarUrl: string) {
+  await page.waitForFunction(() => {
+    const bridgeWindow = window as Window & {
+      __BUZZ_E2E_INVOKE_MOCK_COMMAND__?: unknown;
+      __TAURI_INTERNALS__?: { invoke?: unknown };
+    };
+    return (
+      typeof bridgeWindow.__BUZZ_E2E_INVOKE_MOCK_COMMAND__ === "function" ||
+      typeof bridgeWindow.__TAURI_INTERNALS__?.invoke === "function"
+    );
+  });
+  await invokeMockCommand(page, "update_profile", { avatarUrl });
+  await page.evaluate(() => {
+    window.__BUZZ_E2E_COMMAND_PAYLOADS__ = [];
+  });
+}
+
+async function getWelcomeChannelId(page: Page) {
+  const channels = await getMockChannels(page);
+  return (
+    channels.find(
+      (channel) =>
+        channel.name === "Welcome" && channel.visibility === "private",
+    )?.id ?? null
+  );
+}
+
+async function expectStarterChannels(page: Page) {
+  await expect
+    .poll(async () => {
+      const channels = await getMockChannels(page);
+      return ["general", "welcome-everyone"].map((name) => {
+        const channel = channels.find(
+          (candidate) =>
+            candidate.name === name && candidate.visibility === "open",
+        );
+        if (!channel) {
+          return null;
+        }
+        return {
+          channelType: channel.channel_type,
+          isMember: channel.is_member,
+          memberCountAtLeastOne: channel.member_count >= 1,
+          ttlSeconds: channel.ttl_seconds,
+          visibility: channel.visibility,
+        };
+      });
+    })
+    .toEqual([
+      {
+        channelType: "stream",
+        isMember: true,
+        memberCountAtLeastOne: true,
+        ttlSeconds: null,
+        visibility: "open",
+      },
+      {
+        channelType: "stream",
+        isMember: true,
+        memberCountAtLeastOne: true,
+        ttlSeconds: null,
+        visibility: "open",
+      },
+    ]);
+}
+
+async function expectWelcomeGuideIntro(
+  page: Page,
+  { expectVisible = true }: { expectVisible?: boolean } = {},
+) {
+  await expect
+    .poll(async () => {
+      const channelId = await getWelcomeChannelId(page);
+      if (!channelId) {
+        return null;
+      }
+
+      const [members, agents] = await Promise.all([
+        invokeMockCommand<{
+          members: Array<{ pubkey: string; role: string; is_agent: boolean }>;
+        }>(page, "get_channel_members", { channelId }),
+        invokeMockCommand<
+          Array<{ pubkey: string; name: string; persona_id: string | null }>
+        >(page, "list_managed_agents"),
+      ]);
+      const fizz = agents.find(
+        (agent) =>
+          agent.name === "Scout" && agent.persona_id === "builtin:fizz",
+      );
+      const fizzMember = fizz
+        ? members.members.find((member) => member.pubkey === fizz.pubkey)
+        : null;
+      const profileAvatarUrl = fizz
+        ? (
+            await invokeMockCommand<{
+              profiles: Record<string, { avatar_url: string | null }>;
+            }>(page, "get_users_batch", {
+              pubkeys: [fizz.pubkey],
+            })
+          ).profiles[fizz.pubkey]?.avatar_url
+        : null;
+
+      return {
+        fizzIsBot: fizzMember?.role === "bot" && fizzMember.is_agent,
+        fizzPersonaId: fizz?.persona_id ?? null,
+        profileAvatarUrl,
+      };
+    })
+    .toEqual({
+      fizzIsBot: true,
+      fizzPersonaId: "builtin:fizz",
+      profileAvatarUrl: expect.stringMatching(/^data:image\/svg\+xml,/),
+    });
+
+  if (expectVisible) {
+    await expect(page.getByTestId("message-channel-intro")).toBeVisible();
+    await expect(page.getByTestId("system-message-row")).toHaveCount(0);
+  }
+}
+
+async function expectIncompleteOnboarding(page: Page) {
+  await expect(page.getByTestId("onboarding-gate")).toBeVisible();
+  await expectShellHidden(page);
+  await expect(page.getByTestId("onboarding-page-1")).toBeVisible();
+  await expect(page.getByTestId("onboarding-display-name")).toHaveValue("");
+}
+
+async function completeProfileOnboarding(page: Page) {
+  await page.getByTestId("onboarding-next").click();
+  await expect(page.getByTestId("onboarding-page-avatar")).toBeVisible();
+  await page
+    .getByTestId("onboarding-avatar-url")
+    .fill("https://example.com/onboarding-avatar.png");
+  await page.getByTestId("onboarding-next").click();
+}
+
+test("completed users skip the loading gate while profile is still settling", async ({
+  page,
+}) => {
+  await seedOnboardingCompletion(page, DEFAULT_MOCK_PUBKEY);
+  await installMockBridge(page, {
+    profileReadDelayMs: 3_000,
+  });
+  await page.goto("/");
+
+  await expect(page.getByTestId("onboarding-gate")).toHaveCount(0);
+  await expectHomeView(page);
+});
+
+test("signed-out R17 entry offers email account access", async ({ page }) => {
+  await startR17AccountAuth(page);
+  await expect(page.getByRole("form", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByLabel("Email address")).toBeVisible();
+  await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute(
+    "type",
+    "password",
+  );
+  await expect(
+    page.getByRole("button", { name: "Forgot password?" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Create an account" }),
+  ).toBeVisible();
+  await expect(page.locator("body")).not.toContainText(
+    /\bkey\b|nsec1|backup file|pairing code/i,
+  );
+  await expect(page.getByTestId("nostr-import-file-button")).toHaveCount(0);
+  await expect(page.getByTestId("identity-recovery-pairing")).toHaveCount(0);
+});
+test("R17 signup continues to six-digit email verification", async ({
+  page,
+}) => {
+  await startR17AccountAuth(page);
+  await page.getByRole("button", { name: "Create an account" }).click();
+  await page.getByLabel("Your name").fill("Lerato Molefe");
+  await page.getByLabel("Email address").fill("signup@example.com");
+  await page
+    .getByRole("textbox", { name: "Password" })
+    .fill("correct-horse-12");
+  await page
+    .getByRole("button", { name: "Create account", exact: true })
+    .click();
+
+  await expect(page.getByTestId("account-auth-screen-verify")).toBeVisible();
+  for (let index = 1; index <= 6; index += 1) {
+    await expect(page.getByLabel(`Digit ${index} of 6`)).toBeVisible();
+  }
+  await expect(page.getByTestId("otp-continue")).toBeDisabled();
+  await expect(page.locator("body")).not.toContainText(/\bkey\b|nsec1/i);
+});
+test("R17 signup blocks passwords shorter than the designed minimum", async ({
+  page,
+}) => {
+  await startR17AccountAuth(page);
+  await page.getByRole("button", { name: "Create an account" }).click();
+  await page.getByLabel("Your name").fill("Lerato Molefe");
+  await page.getByLabel("Email address").fill("short-password@example.com");
+  const password = page.getByRole("textbox", { name: "Password" });
+  await password.fill("shortpass");
+
+  await expect(password).toHaveAttribute("minlength", "10");
+  expect(
+    await password.evaluate(
+      (input) => (input as HTMLInputElement).validity.tooShort,
+    ),
+  ).toBe(true);
+  await page
+    .getByRole("button", { name: "Create account", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Let’s get you started." }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Digit 1 of 6")).toHaveCount(0);
+});
+test("R17 password recovery uses the six-digit email code", async ({
+  page,
+}) => {
+  await startR17AccountAuth(page);
+  await page.getByRole("button", { name: "Forgot password?" }).click();
+  await expect(
+    page.getByTestId("account-auth-screen-reset-request"),
+  ).toBeVisible();
+  await page.getByLabel("Email address").fill("reset@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+
+  await expect(
+    page.getByTestId("account-auth-screen-reset-confirm"),
+  ).toBeVisible();
+  for (let index = 1; index <= 6; index += 1) {
+    await expect(page.getByLabel(`Digit ${index} of 6`)).toBeVisible();
+  }
+  await expect(
+    page.getByRole("button", { name: "Resend code in 60s" }),
+  ).toBeDisabled();
+  await expect(page.locator("body")).not.toContainText(
+    /backup file|pairing code|nsec1/i,
+  );
+});
+test("returning R17 accounts continue into business setup", async ({
+  page,
+}) => {
+  await openR17BusinessSetup(page);
+  await expect(page.getByTestId("onboarding-scene-business")).toBeVisible();
+  await expect(page.getByLabel("Business name")).toBeVisible();
+  await expect(page.getByTestId("onboarding-page-avatar")).toHaveCount(0);
+  await expect(page.getByTestId("app-sidebar")).toHaveCount(0);
+});
+test("R17 verified signup continues through business and provider setup", async ({
+  page,
+}) => {
+  await startR17AccountAuth(page);
+  await page.getByRole("button", { name: "Create an account" }).click();
+  await page.getByLabel("Your name").fill("Lerato Molefe");
+  await page.getByLabel("Email address").fill("verified@example.com");
+  await page
+    .getByRole("textbox", { name: "Password" })
+    .fill("correct-horse-12");
+  await page
+    .getByRole("button", { name: "Create account", exact: true })
+    .click();
+  await expect(page.getByTestId("account-auth-screen-verify")).toBeVisible();
+  for (let index = 1; index <= 6; index += 1) {
+    await page.getByLabel(`Digit ${index} of 6`).fill(String(index));
+  }
+  await page.getByTestId("otp-continue").click();
+
+  await expect(page.getByTestId("onboarding-scene-business")).toBeVisible();
+  await completeR17BusinessSetup(page);
+  await expect(page.getByTestId("onboarding-scene-connect")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Skip for now", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByTestId("app-sidebar")).toHaveCount(0);
+});
+test("R17 password recovery returns to sign in without backup import", async ({
+  page,
+}) => {
+  await startR17AccountAuth(page);
+  await page.getByRole("button", { name: "Forgot password?" }).click();
+  await expect(
+    page.getByTestId("account-auth-screen-reset-request"),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Back to sign in", exact: true })
+    .click();
+
+  await expect(
+    page.getByRole("heading", { name: "Welcome back." }),
+  ).toBeVisible();
+  await expect(page.getByRole("form", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByTestId("nostr-import-passphrase")).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(
+    /ncryptsec|backup password/i,
+  );
+});
+test("R17 business details save before the provider connection step", async ({
+  page,
+}) => {
+  await openR17BusinessSetup(page);
+  await completeR17BusinessSetup(page);
+
+  const savedBusiness = await page.evaluate((key) => {
+    return JSON.parse(window.localStorage.getItem(key) ?? "null");
+  }, R17_BUSINESS_PROFILE_KEY);
+  expect(savedBusiness).toMatchObject({
+    name: "North Star",
+    website: "northstar.example",
+    description: "An independent design studio.",
+  });
+  expect(savedBusiness.logoDataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
+  await expect(page.getByTestId("onboarding-scene-connect")).toBeVisible();
+  await expect(page.getByTestId("onboarding-page-avatar")).toHaveCount(0);
+});
+test("non-local runtime override keeps community selection without release flag", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(page, undefined, {
+    relayWsUrl: "wss://override.example.com",
+    skipOnboardingSeed: true,
+    skipCommunitySeed: true,
+  });
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("button", { name: /Join a community/ }),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("buzz-communities")))
+    .toBeNull();
+});
+
+test("non-local default auto-connects when the release flag is enabled", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(page, undefined, {
+    relayWsUrl: "wss://default.example.com",
+    autoConnectDefaultRelay: true,
+    skipOnboardingSeed: true,
+    skipCommunitySeed: true,
+  });
+  await page.goto("/");
+
+  await expectIncompleteOnboarding(page);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = window.localStorage.getItem("buzz-communities");
+        const communities = raw
+          ? (JSON.parse(raw) as Array<{ id: string; relayUrl: string }>)
+          : [];
+        return {
+          activeMatchesCommunity:
+            communities.length === 1 &&
+            window.localStorage.getItem("buzz-active-community-id") ===
+              communities[0]?.id,
+          relayUrl: communities[0]?.relayUrl ?? null,
+        };
+      }),
+    )
+    .toEqual({
+      activeMatchesCommunity: true,
+      relayUrl: "wss://default.example.com",
+    });
+});
+
+test("first-community choices route join, create, owner, and member intents", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(page, undefined, {
+    relayWsUrl: "ws://localhost:3000",
+    skipOnboardingSeed: true,
+    skipCommunitySeed: true,
+  });
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("button", { name: /Join a community/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Create a community/ }),
+  ).toBeVisible();
+  const existing = page.getByRole("button", {
+    name: /I already have a community/,
+  });
+  await expect(existing).toBeVisible();
+  await existing.click();
+  // Owner/member split lives on its own page, mirroring the hub layout.
+  await expect(
+    page.getByRole("heading", { name: "Reconnect to your community" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "I own the community" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "I’m a member or admin" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "I’m a member or admin" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Reconnect to your community" }),
+  ).toBeVisible();
+  const accessInput = page.getByTestId("invite-redeem-input");
+  await expect(accessInput).toHaveAttribute(
+    "placeholder",
+    "Invite link or community URL",
+  );
+  await accessInput.fill("https://default.example.com");
+  await expect(page.getByTestId("invite-redeem-submit")).toBeEnabled();
+  // Back from the member form returns to the role choice, then to the hub.
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(
+    page.getByRole("button", { name: "I own the community" }),
+  ).toBeVisible();
+  await page.getByTestId("existing-back").click();
+
+  await page.getByRole("button", { name: /Join a community/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Join a community" }),
+  ).toBeVisible();
+  await expect(page.getByText("Joining a private community?")).toBeVisible();
+  await expect(page.getByTestId("welcome-join-npub")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Copy public ID" }),
+  ).toBeVisible();
+  await accessInput.fill("https://default.example.com/invite/abc123");
+  await expect(page.getByTestId("invite-redeem-submit")).toBeEnabled();
+});
+
+test("first-community owner reconnect path does not expose Builderlab creation", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    {},
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await openOwnedCommunityReconnect(page);
+  await page.getByRole("button", { name: "Sign in to continue" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Finish connecting Colony" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Connect and continue" }).click();
+  await expect(
+    page.getByRole("heading", { name: "No communities to connect" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("hosted-community-empty-state")).toBeVisible();
+  await expect(page.getByTestId("hosted-community-create-form")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Next" })).toHaveCount(0);
+});
+
+test("first-community X cancels a pending sign-in", async ({ page }) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    { builderlabLoginDelayMs: 5_000 },
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await openOwnedCommunityReconnect(page);
+  await page.getByRole("button", { name: "Sign in to continue" }).click();
+  await expect(page.getByText("Waiting for your browser…")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Cancel sign-in" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(
+    page.getByRole("button", { name: /Create a community/ }),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__BUZZ_E2E_COMMANDS__ ?? []))
+    .toEqual(expect.arrayContaining(["cancel_builderlab_login"]));
+});
+
+test("first-community owner can replace a mismatched account identity", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    {
+      builderlabAuth: {
+        email: "old-owner@example.com",
+        expiresAt: "2099-01-01T00:00:00Z",
+      },
+      builderlabIdentity: {
+        pubkey_hex: "f".repeat(64),
+        // Contradiction: the server npub spells this device's key, not the
+        // bound pubkey_hex the mismatch gate and recovery actions use.
+        npub: npubEncode(BLANK_TYLER_IDENTITY.pubkey),
+      },
+    },
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await openOwnedCommunityReconnect(page);
+  await expect(
+    page.getByRole("heading", {
+      name: "This account uses a different Colony identity",
+    }),
+  ).toBeVisible();
+  // The account row must show the authoritative bound key's npub, never the
+  // contradictory hosted npub (which here spells the device key) or raw hex.
+  const identityRows = page.getByText(/^Account: npub1/);
+  await expect(identityRows).toContainText(
+    `Account: ${npubEncode("f".repeat(64))}`,
+  );
+  await expect(identityRows).toContainText(
+    `This device: ${npubEncode(BLANK_TYLER_IDENTITY.pubkey)}`,
+  );
+  await expect(identityRows).not.toContainText(
+    `Account: ${npubEncode(BLANK_TYLER_IDENTITY.pubkey)}`,
+  );
+  await expect(page.getByText("f".repeat(64))).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Use this device's identity" })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => window.__BUZZ_E2E_COMMANDS__ ?? []))
+    .toEqual(
+      expect.arrayContaining([
+        "delete_builderlab_nostr_identity",
+        "bind_builderlab_nostr_identity",
+      ]),
+    );
+  await expect(
+    page.getByRole("heading", { name: "No communities to connect" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("hosted-community-empty-state")).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: "Community name" }),
+  ).toHaveCount(0);
+});
+
+test("first-community owner recovers from an npub-only account identity", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    {
+      builderlabAuth: {
+        email: "old-owner@example.com",
+        expiresAt: "2099-01-01T00:00:00Z",
+      },
+      builderlabIdentity: {
+        // Identity object present, but no authoritative pubkey_hex. only
+        // the independent server npub, spelled for a different key.
+        npub: npubEncode("f".repeat(64)),
+      },
+      builderlabCommunities: [
+        {
+          id: "owned-community",
+          name: "North Star",
+          normalized_host: "north-star.communities.buzz.xyz",
+        },
+      ],
+    },
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await openOwnedCommunityReconnect(page);
+  // Presence of the identity object must not read as a linked, ready
+  // account: the mismatch recovery modal drives the flow instead.
+  await expect(
+    page.getByRole("heading", {
+      name: "This account uses a different Colony identity",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(`Account: ${npubEncode("f".repeat(64))}`),
+  ).toHaveCount(0);
+  await expect(page.getByText("Account: Unavailable")).toBeVisible();
+  await expect(
+    page.getByText(`This device: ${npubEncode(BLANK_TYLER_IDENTITY.pubkey)}`),
+  ).toBeVisible();
+  // No create/connect surface is exposed behind the recovery modal.
+  await expect(page.getByTestId("hosted-community-create-surface")).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("button", { name: "Connect", exact: true }),
+  ).toHaveCount(0);
+
+  // Recovery rebinds the device key and restores readiness.
+  await page
+    .getByRole("button", { name: "Use this device's identity" })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => window.__BUZZ_E2E_COMMANDS__ ?? []))
+    .toEqual(
+      expect.arrayContaining([
+        "delete_builderlab_nostr_identity",
+        "bind_builderlab_nostr_identity",
+      ]),
+    );
+  await expect(
+    page.getByRole("heading", { name: "Choose a community" }),
+  ).toBeVisible();
+  await expect(page.getByText("North Star")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Connect", exact: true }),
+  ).toBeEnabled();
+});
+
+test("first-community owner never rebinds over a same-key spelling in the hex field", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    {
+      builderlabAuth: {
+        email: "old-owner@example.com",
+        expiresAt: "2099-01-01T00:00:00Z",
+      },
+      builderlabIdentity: {
+        // A checksum-valid npub stored in the authoritative hex field,
+        // spelling this very device's key. It is not a hex key: recovery
+        // owns the flow, the spelling never renders as the account's key,
+        // and no delete/rebind of the identity the device already holds
+        // is demanded for it.
+        pubkey_hex: npubEncode(BLANK_TYLER_IDENTITY.pubkey),
+      },
+      builderlabCommunities: [
+        {
+          id: "owned-community",
+          name: "North Star",
+          normalized_host: "north-star.communities.buzz.xyz",
+        },
+      ],
+    },
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await openOwnedCommunityReconnect(page);
+  await expect(
+    page.getByRole("heading", {
+      name: "This account uses a different Colony identity",
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("Account: Unavailable")).toBeVisible();
+  await expect(
+    page.getByText(`Account: ${npubEncode(BLANK_TYLER_IDENTITY.pubkey)}`),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText(`This device: ${npubEncode(BLANK_TYLER_IDENTITY.pubkey)}`),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Connect", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("first-community owner with a padded same-key hex is ready, not mismatched", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    {
+      builderlabAuth: {
+        email: "owner@example.com",
+        expiresAt: "2099-01-01T00:00:00Z",
+      },
+      builderlabIdentity: {
+        // The device's own key, padded and uppercased: the same key after
+        // normalization, so the account is ready. never a mismatch
+        // demanding a delete/rebind of the identity it already holds.
+        pubkey_hex: `  ${BLANK_TYLER_IDENTITY.pubkey.toUpperCase()}  `,
+      },
+    },
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await openOwnedCommunityReconnect(page);
+  await expect(
+    page.getByRole("heading", {
+      name: "This account uses a different Colony identity",
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "No communities to connect" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("hosted-community-empty-state")).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: "Community name" }),
+  ).toHaveCount(0);
+});
+
+test("first-community explains when the local identity belongs to another account", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    {
+      builderlabAuth: {
+        email: "wrong-owner@example.com",
+        expiresAt: "2099-01-01T00:00:00Z",
+      },
+      builderlabIdentity: { pubkey_hex: "e".repeat(64) },
+      builderlabBindError: { code: "pubkey_already_bound" },
+    },
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await openOwnedCommunityReconnect(page);
+  await page
+    .getByRole("button", { name: "Use this device's identity" })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(
+    "This device's Colony identity belongs to a different Builderlab account and can't be moved from here. Sign out, then sign in with the account that already owns this identity.",
+  );
+  await expect(
+    page.getByRole("heading", { name: "Finish connecting Colony" }),
+  ).toBeVisible();
+});
+
+test("back clears Builderlab auth before returning to first-community choices", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    {
+      builderlabAuth: {
+        email: "owner@example.com",
+        expiresAt: "2099-01-01T00:00:00Z",
+      },
+      builderlabIdentity: { pubkey_hex: BLANK_TYLER_IDENTITY.pubkey },
+    },
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await openOwnedCommunityReconnect(page);
+  await page.getByRole("button", { name: "Back" }).click();
+  await openOwnedCommunityReconnect(page);
+  await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
+});
+
+test("first-community shows the scenario cards for localhost", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    {
+      acpRuntimesCatalog: [
+        {
+          id: "claude",
+          label: "Claude Code",
+          avatar_url: "",
+          availability: "available",
+          command: "claude",
+          binary_path: "/usr/local/bin/claude",
+          default_args: [],
+          mcp_command: null,
+          install_hint: "Install Claude Code",
+          install_instructions_url: "https://example.com",
+          can_auto_install: true,
+          underlying_cli_path: null,
+          node_required: false,
+          auth_status: { status: "logged_in" },
+          login_hint: "Sign in to Claude Code",
+        },
+      ],
+    },
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("button", { name: "Join default community" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /Join a community/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: /Create a community/,
+    }),
+  ).toBeVisible();
+
+  await page.getByTestId("community-choice-join").click();
+  await expect(
+    page
+      .getByTestId("welcome-setup")
+      .locator(".buzz-onboarding-transition-line"),
+  ).toHaveAttribute("data-onboarding-direction", "forward");
+  await expect(
+    page
+      .getByTestId("welcome-setup")
+      .locator(".buzz-onboarding-transition-line"),
+  ).toHaveAttribute("data-onboarding-effect", "line-slide");
+  const joinBack = page.getByTestId("welcome-join-back");
+  await expect(joinBack).toBeVisible();
+  await joinBack.click();
+  await expect(
+    page
+      .getByTestId("welcome-setup")
+      .locator(".buzz-onboarding-transition-line"),
+  ).toHaveAttribute("data-onboarding-direction", "backward");
+
+  await page.getByTestId("welcome-setup-back").click();
+  await expect(page.getByTestId("onboarding-page-config")).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Choose your model settings",
+    }),
+  ).toBeVisible();
+  await expect(page.getByTestId("global-agent-default-harness")).toHaveText(
+    "Claude Code",
+  );
+  await expect(page.getByTestId("onboarding-finish")).toBeEnabled();
+});
+
+test("first-community direct join recovery can cancel community edits safely", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript((pubkey) => {
+    window.localStorage.setItem(
+      `buzz-machine-onboarding-complete.v2:${pubkey}`,
+      "true",
+    );
+  }, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(
+    page,
+    {
+      applyCommunityDelayMs: 500,
+      applyCommunityError: "Temporary community connection failure.",
+    },
+    {
+      relayWsUrl: "ws://localhost:3000",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /Join a community/ }).click();
+  await page
+    .getByTestId("invite-redeem-input")
+    .fill("wss://onboarding.communities.buzz.xyz");
+  await page.getByTestId("invite-redeem-submit").click();
+  await expect(
+    page.getByRole("heading", { name: "Your Colony isn’t ready yet." }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Change community", exact: true })
+    .click();
+  await expect(page.getByTestId("community-change-overlay")).toBeVisible();
+  await page
+    .getByTestId("community-change-overlay")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+
+  await expect(
+    page.getByRole("heading", { name: "Your Colony isn’t ready yet." }),
+  ).toBeVisible();
+  await expect(page.getByTestId("community-change-overlay")).toHaveCount(0);
+  await expect(page.getByText("Create an identity key")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (storageKey) => ({
+          communities: window.localStorage.getItem("buzz-communities"),
+          transaction: window.localStorage.getItem(storageKey),
+        }),
+        COMMUNITY_ONBOARDING_TRANSACTION_STORAGE_KEY,
+      ),
+    )
+    .toEqual({
+      communities: expect.stringContaining("onboarding.communities.buzz.xyz"),
+      transaction: expect.stringContaining("connecting"),
+    });
+});
+
+test("canceling recovery edits preserves an existing inactive community", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await page.addInitScript(
+    ({ pubkey, relayUrl }) => {
+      window.localStorage.setItem(
+        `buzz-machine-onboarding-complete.v2:${pubkey}`,
+        "true",
+      );
+      const timestamp = new Date().toISOString();
+      window.localStorage.setItem(
+        "buzz-communities",
+        JSON.stringify([
+          {
+            id: "active-community",
+            name: "Active",
+            relayUrl: "wss://active.example.com",
+            addedAt: timestamp,
+          },
+          {
+            id: "existing-community",
+            name: "Existing",
+            relayUrl,
+            addedAt: timestamp,
+          },
+        ]),
+      );
+      window.localStorage.setItem(
+        "buzz-active-community-id",
+        "active-community",
+      );
+    },
+    {
+      pubkey: BLANK_TYLER_IDENTITY.pubkey,
+      relayUrl: "wss://onboarding.communities.buzz.xyz",
+    },
+  );
+  await installMockBridge(
+    page,
+    {
+      applyCommunityDelayMs: 500,
+      applyCommunityError: "Temporary community connection failure.",
+    },
+    {
+      relayWsUrl: "wss://active.example.com",
+      skipOnboardingSeed: true,
+      skipCommunitySeed: true,
+    },
+  );
+  await page.goto("/");
+
+  await page.evaluate((transactionStorageKey) => {
+    const timestamp = new Date().toISOString();
+    window.localStorage.setItem(
+      transactionStorageKey,
+      JSON.stringify({
+        id: "existing-community-join",
+        source: "add-community",
+        stage: "connecting",
+        relayUrl: "wss://onboarding.communities.buzz.xyz",
+        communityName: "Existing",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+    window.location.reload();
+  }, COMMUNITY_ONBOARDING_TRANSACTION_STORAGE_KEY);
+
+  await expect(
+    page.getByRole("heading", { name: "Your Colony isn’t ready yet." }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Change community", exact: true })
+    .click();
+  await expect(page.getByTestId("community-change-overlay")).toBeVisible();
+  // A failed connect must never strand the person on this community.
+  await expect(
+    page
+      .getByTestId("community-change-overlay")
+      .getByTestId("community-escape-remove"),
+  ).toBeVisible();
+  await page
+    .getByTestId("community-change-overlay")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  await expect(page.getByTestId("community-change-overlay")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Your Colony isn’t ready yet." }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = window.localStorage.getItem("buzz-communities");
+        return raw
+          ? (JSON.parse(raw) as Array<{ id: string }>).map(({ id }) => id)
+          : [];
+      }),
+    )
+    .toEqual(["active-community", "existing-community"]);
+});
+
+test("identity fallback text does not count as a real onboarding name", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(page, undefined, { skipOnboardingSeed: true });
+  await page.goto("/");
+
+  await expectIncompleteOnboarding(page);
+  await expect(page.getByTestId("onboarding-next")).toBeDisabled();
+});
+
+// Regression test for the H2 predicate fix (PR #1508).
+// A blank first-run identity (no kind:0 event on the relay) must see
+// onboarding even when the mock bridge returns display_name: "". the gate
+// must depend on `hasProfileEvent`, not on `typeof displayName === "string"`.
+test("first-run blank identity with no profile event sees onboarding", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  // Do NOT seed searchProfiles for tyler's pubkey, so ensureMockProfile
+  // constructs a synthesised profile with has_profile_event: false.
+  await installMockBridge(page, undefined, { skipOnboardingSeed: true });
+  await page.goto("/");
+
+  await expectIncompleteOnboarding(page);
+});
+
+// Regression test for the H2 predicate fix (PR #1508).
+// A returning user who has a real kind:0 profile event with an empty
+// display_name must skip onboarding. they are already onboarded.
+test("returning user with blank display name and real profile event skips onboarding", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  // Seed tyler's pubkey into searchProfiles with an empty displayName.
+  // seedMockSearchProfiles stores this into mockProfiles with
+  // has_profile_event: true, simulating a real kind:0 event with no name.
+  await installMockBridge(
+    page,
+    {
+      searchProfiles: [
+        {
+          pubkey: TEST_IDENTITIES.tyler.pubkey,
+          displayName: "",
+        },
+      ],
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  // Profile event exists → onboarding is skipped, app renders.
+  await expect(page.getByTestId("onboarding-gate")).toHaveCount(0);
+  await expectHomeView(page);
+});
+
+// Regression test for the cache-seed defect (PR #1508 CRITICAL fix).
+// Sequence: no-event profile fetched and cached with hasProfileEvent absent →
+// reload with cache present → onboarding must still show. Previously the
+// initialData seed hardcoded hasProfileEvent: true for any updatedAt > 0
+// entry, reopening the original bug on the second app load.
+test("no-event profile cached then reloaded still sees onboarding", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  // Seed a stale v1 cache entry WITHOUT hasProfileEvent (simulating a cache
+  // written by the old code path or a no-event fallback). updatedAt > 0 so
+  // the seed is eligible, but hasProfileEvent is absent → conservative false.
+  const SELF_PROFILE_CACHE_KEY = `buzz-self-profile.v1:ws://localhost:3000:${TEST_IDENTITIES.tyler.pubkey}`;
+  await page.addInitScript(
+    ({ key, cache }) => {
+      window.localStorage.setItem(key, JSON.stringify(cache));
+    },
+    {
+      key: SELF_PROFILE_CACHE_KEY,
+      cache: {
+        version: 1,
+        displayName: null,
+        avatarUrl: null,
+        avatarDataUrl: null,
+        updatedAt: 1_700_000_000_000,
+        // hasProfileEvent deliberately absent. legacy/no-event entry.
+      },
+    },
+  );
+  // No profile event on the relay either. ensureMockProfile uses false.
+  await installMockBridge(page, undefined, { skipOnboardingSeed: true });
+  await page.goto("/");
+
+  // Cache seed must NOT promote hasProfileEvent to true. Onboarding shows.
+  await expectIncompleteOnboarding(page);
+});
+
+test("avatar step uses an add-image placeholder before an avatar is chosen", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_AVATAR_PLACEHOLDER_IDENTITY);
+  await installMockBridge(page, undefined, { skipOnboardingSeed: true });
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  await expect(page.getByTestId("onboarding-page-avatar")).toBeVisible();
+  const preview = page.getByTestId("onboarding-avatar-preview");
+  await expect(preview).toBeVisible();
+  await expect(preview).toHaveAttribute("aria-label", "Add a display image");
+  await expect(preview).toHaveClass(/border-dashed/);
+});
+
+test("avatar step reveals preset backgrounds after the first emoji pick", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_AVATAR_EMOJI_IDENTITY);
+  await installMockBridge(page, undefined, { skipOnboardingSeed: true });
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+  await expect(page.getByTestId("onboarding-page-avatar")).toBeVisible();
+
+  await page.getByTestId("onboarding-avatar-mode-emoji").click();
+
+  const colorGridShell = page.getByTestId("onboarding-avatar-color-grid-shell");
+  await expect(colorGridShell).toHaveAttribute("aria-hidden", "true");
+
+  await selectFirstEmojiFromPicker(page);
+
+  await expect(colorGridShell).toHaveAttribute("aria-hidden", "false");
+  await expect(page.getByTestId("onboarding-avatar-color-grid")).toBeVisible();
+  await expect(page.getByTestId("onboarding-avatar-preview")).not.toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
+});
+
+test("R17 business logo upload is retained on the connection screen", async ({
+  page,
+}) => {
+  await openR17BusinessSetup(page);
+  await completeR17BusinessSetup(page);
+
+  const savedBusiness = await page.evaluate((key) => {
+    return JSON.parse(window.localStorage.getItem(key) ?? "null");
+  }, R17_BUSINESS_PROFILE_KEY);
+  expect(savedBusiness.logoDataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
+  await expect(page.getByTestId("onboarding-scene-connect")).toBeVisible();
+});
+test("R17 provider discovery failure keeps workspace entry available", async ({
+  page,
+}) => {
+  await startR17AccountAuth(page, { discoveryError: true });
+  await page.getByLabel("Email address").fill("setup@example.com");
+  await page
+    .getByRole("textbox", { name: "Password" })
+    .fill("correct-horse-12");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByTestId("onboarding-scene-business")).toBeVisible();
+  await completeR17BusinessSetup(page);
+
+  await expect(page.getByRole("alert")).toContainText(
+    "We couldn’t check this computer.",
+  );
+  await expect(
+    page.getByRole("button", { name: "Skip for now", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByTestId("app-sidebar")).toHaveCount(0);
+  await page.getByRole("button", { name: "Skip for now", exact: true }).click();
+  await expect(page.getByTestId("app-sidebar")).toBeVisible();
+});
+test("avatar upload rejects a file whose server-detected MIME is not an image", async ({
+  page,
+}) => {
+  // Models a spoofed/blank picker MIME: the picked file claims to be an image
+  // (passes the browser-side accept filter) but the shared generic upload path
+  // returns a non-image descriptor. The post-upload backstop must reject it so
+  // a non-image can't become an avatar (regression guard. the shared upload
+  // path no longer rejects non-images server-side).
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      uploadDescriptors: [
+        {
+          url: `https://mock.relay/media/${"b".repeat(64)}.pdf`,
+          sha256: "b".repeat(64),
+          size: 4096,
+          type: "application/pdf",
+          uploaded: Math.floor(Date.now() / 1000),
+          filename: "not-an-image.pdf",
+        },
+      ],
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+  await expect(page.getByTestId("onboarding-page-avatar")).toBeVisible();
+  await page.getByTestId("onboarding-avatar-input").setInputFiles({
+    name: "looks-like.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("not really a png"),
+  });
+
+  await expect(page.getByRole("alert")).toContainText(
+    "Choose a PNG, JPG, GIF, or WebP image.",
+  );
+  await expect(page.getByTestId("onboarding-avatar-url")).toHaveValue("");
+});
+
+test("avatar upload accepts a file whose server-detected MIME is an image", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  const url = `https://mock.relay/media/${"c".repeat(64)}.png`;
+  await installMockBridge(
+    page,
+    {
+      uploadDescriptors: [
+        {
+          url,
+          sha256: "c".repeat(64),
+          size: 2048,
+          type: "image/png",
+          uploaded: Math.floor(Date.now() / 1000),
+        },
+      ],
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+  await expect(page.getByTestId("onboarding-page-avatar")).toBeVisible();
+  await page.getByTestId("onboarding-avatar-input").setInputFiles({
+    name: "avatar.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("png bytes"),
+  });
+
+  await expect(page.getByTestId("onboarding-avatar-url")).toHaveValue("");
+  await expect(
+    page.getByTestId("onboarding-avatar-preview-fallback"),
+  ).toHaveText("MQ");
+  await expect(page.getByTestId("onboarding-avatar-error")).toHaveCount(0);
+});
+
+test("R17 keeps the workspace shell hidden until account setup is opened", async ({
+  page,
+}) => {
+  await startR17AccountAuth(page);
+  await expect(page.getByTestId("app-sidebar")).toHaveCount(0);
+  await page.getByLabel("Email address").fill("setup@example.com");
+  await page
+    .getByRole("textbox", { name: "Password" })
+    .fill("correct-horse-12");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByTestId("onboarding-scene-business")).toBeVisible();
+  await expect(page.getByTestId("app-sidebar")).toHaveCount(0);
+  await completeR17BusinessSetup(page);
+  await expect(page.getByTestId("app-sidebar")).toHaveCount(0);
+  await page.getByRole("button", { name: "Skip for now", exact: true }).click();
+  await expect(page.getByTestId("app-sidebar")).toBeVisible();
+});
+test("failed public starter channel setup does not show a retry toast", async ({
+  page,
+}) => {
+  const starterError = "Mock starter channel setup failed.";
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    { ensureStarterChannelsErrors: [starterError, starterError] },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await completeProfileOnboarding(page);
+
+  await expectPrivateWelcomeLanding(page);
+  await expect(
+    page
+      .locator("[data-sonner-toast][data-removed='false']")
+      .filter({ hasText: "Couldn't set up starter channels" }),
+  ).toHaveCount(0);
+  expect(await commandCount(page, "ensure_starter_channels")).toBe(2);
+});
+
+test("first-run onboarding posts the live Scout kickoff", async ({ page }) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      acpRuntimesCatalog: [
+        r17Runtime("claude", "available", { status: "logged_in" }),
+        r17Runtime("buzz-agent", "available", { status: "not_applicable" }),
+      ],
+      globalAgentConfig: {
+        env_vars: { OPENAI_COMPAT_API_KEY: "e2e-placeholder" },
+        provider: "openai",
+        model: "gpt-5.5",
+      },
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await completeProfileOnboarding(page);
+
+  await expectPrivateWelcomeLanding(page);
+  // A legacy null preference inherits its configured bundled provider.
+  // The opener does not wait for teammate relay presence.
+  await waitForWelcomeTeam(page);
+  // Greeted by the name typed above  -  the @mention pill also files the opener
+  // into the new user's Inbox mentions feed.
+  await expect(page.getByTestId("message-timeline")).toContainText(
+    "Hi Morty QA, I'm Scout. Welcome to Colony.",
+  );
+  await expect(page.getByTestId("message-timeline")).toContainText(
+    "What can I help you build?",
+  );
+});
+
+test("first-run onboarding lands before Welcome team bootstrap completes", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      createManagedAgentDelayMs: 1_000,
+      acpRuntimesCatalog: [
+        r17Runtime("claude", "available", { status: "logged_in" }),
+        r17Runtime("buzz-agent", "available", { status: "not_applicable" }),
+      ],
+      globalAgentConfig: {
+        env_vars: { OPENAI_COMPAT_API_KEY: "e2e-placeholder" },
+        provider: "openai",
+        model: "gpt-5.5",
+      },
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await completeProfileOnboarding(page);
+
+  await expectPrivateWelcomeLanding(page);
+  await expect(page.getByTestId("app-loading-gate")).toHaveCount(0);
+  await publishWelcomeTeamPresence(page);
+  await expect(page.getByTestId("message-timeline")).toContainText(
+    "Hi Morty QA, I'm Scout. Welcome to Colony.",
+  );
+  await page.waitForTimeout(1_500);
+  expect(await commandCount(page, "create_managed_agent")).toBe(1);
+});
+
+test("existing relay profile with display name auto-skips onboarding without localStorage", async ({
+  page,
+}) => {
+  // A user whose relay profile already has a display name should skip
+  // onboarding even without the localStorage completion flag.
+  // Seed alice's pubkey into searchProfiles so seedMockSearchProfiles writes
+  // has_profile_event: true into mockProfiles. the harness-intended mechanism
+  // for simulating a returning user with a real kind:0 event. Do NOT use the
+  // static mockProfiles seed (removed in PR #1508); that path collides with
+  // FIRST_RUN_ALICE (same pubkey) and breaks the first-run onboarding specs.
+  await seedActiveIdentity(page, TEST_IDENTITIES.alice);
+  await installMockBridge(
+    page,
+    {
+      searchProfiles: [
+        { pubkey: TEST_IDENTITIES.alice.pubkey, displayName: "alice" },
+      ],
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await expect(page.getByTestId("onboarding-gate")).toHaveCount(0);
+  await expectHomeView(page);
+});
+
+test("onboarding uses the existing identity when the community is already set up", async ({
+  page,
+}) => {
+  // Community exists (default seed), and machine onboarding has already created
+  // this identity. Profile setup must not offer to create or replace it.
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(page, undefined, { skipOnboardingSeed: true });
+  await page.goto("/");
+
+  await expect(page.getByTestId("onboarding-display-name")).toHaveValue("");
+  await expect(page.getByTestId("onboarding-next")).toHaveText("Continue");
+  await expect(page.getByTestId("onboarding-import-key")).toHaveCount(0);
+  await expect(page.getByText("Create an identity key")).toHaveCount(0);
+});
+
+test("completed onboarding backfills missing starter channels", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await seedOnboardingCompletion(page, BLANK_TYLER_IDENTITY.pubkey);
+  await installMockBridge(page, undefined, { skipOnboardingSeed: true });
+  await page.goto("/");
+
+  await expect(page.getByTestId("onboarding-gate")).toHaveCount(0);
+  await expectHomeView(page);
+  await expect(page.getByTestId("channel-general")).toBeVisible();
+  await expect(page.getByTestId("channel-welcome-everyone")).toBeVisible();
+  await expectStarterChannels(page);
+  await expectWelcomeGuideIntro(page, { expectVisible: false });
+});
+
+test("R17 connection setup opens the designed workspace route", async ({
+  page,
+}) => {
+  await openR17BusinessSetup(page);
+  await completeR17BusinessSetup(page);
+  await expect(
+    page.getByRole("heading", { name: "Let’s connect your first agent." }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("radio", { name: "Claude Code or Codex", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("radio", { name: "Colony Agent", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("radio", { name: "Bring your own key" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Skip for now", exact: true }).click();
+  await expect(page.getByTestId("app-sidebar")).toBeVisible();
+});
+test("welcome-everywhere banner: X dismiss removes the guidance surface", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      acpRuntimesCatalog: [
+        r17Runtime("claude", "available", { status: "logged_in" }),
+      ],
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await completeProfileOnboarding(page);
+  await publishWelcomeTeamPresence(page);
+
+  const banner = page.getByTestId("welcome-composer-guide-banner");
+  const guidanceLayer = page.getByTestId("welcome-composer-guidance-layer");
+  const dismissButton = page.getByTestId("welcome-composer-dismiss-button");
+
+  // Banner and guidance layer are visible in the prompt state.
+  await expect(banner).toBeVisible();
+  await expect(guidanceLayer).toBeVisible();
+  await expect(dismissButton).toBeVisible();
+
+  await dismissButton.click();
+
+  // After dismiss the entire guidance surface must be gone.
+  await expect(banner).toHaveCount(0, { timeout: 2_000 });
+  await expect(guidanceLayer).toHaveCount(0);
+});
+
+test("welcome-everywhere banner: dismiss persists after channel re-entry", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      acpRuntimesCatalog: [
+        r17Runtime("claude", "available", { status: "logged_in" }),
+      ],
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await completeProfileOnboarding(page);
+  await publishWelcomeTeamPresence(page);
+
+  const banner = page.getByTestId("welcome-composer-guide-banner");
+
+  await expect(banner).toBeVisible();
+  await page.getByTestId("welcome-composer-dismiss-button").click();
+  await expect(banner).toHaveCount(0, { timeout: 2_000 });
+
+  // Leave the Welcome channel.
+  await page.getByTestId("channel-general").click();
+  await expect(page.getByTestId("chat-title")).toContainText("general");
+  await expect(banner).toHaveCount(0);
+
+  // Return. banner must stay hidden.
+  await page.getByTestId("channel-welcome-everyone").click();
+  await expect(page.getByTestId("chat-title")).toContainText(
+    "welcome-everyone",
+  );
+  await expect(banner).toHaveCount(0);
+});
+
+test("initial profile read failures still hold incomplete users in onboarding", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      profileReadError: "Temporary profile read failure.",
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await expectIncompleteOnboarding(page);
+});
+
+test("failed first profile saves can be skipped for the current session", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      profileUpdateError: "Temporary profile sync failure.",
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await expect(page.getByTestId("onboarding-gate")).toBeVisible();
+  await expect(page.getByTestId("onboarding-display-name")).toHaveValue("");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  await expect(page.getByText("Temporary profile sync failure.")).toBeVisible();
+  await page.getByTestId("onboarding-skip").click();
+
+  await expect(page.getByTestId("onboarding-gate")).toHaveCount(0);
+  await expectHomeView(page);
+});
+
+test("generic relay save failures use the generic reconnect card", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      profileUpdateError: "relay unreachable: could not connect to relay",
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  await expect(
+    page.getByTestId("onboarding-relay-reconnect-card"),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("onboarding-relay-reconnect-card"),
+  ).toContainText("Can't reach the relay");
+  await expect(
+    page.getByTestId("onboarding-relay-reconnect-card"),
+  ).toContainText("Click to connect");
+});
+
+test("custom relay proxy sign-in failures use the generic reconnect card", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      profileUpdateError:
+        "relay unreachable: relay returned an unexpected HTML page (network sign-in?)",
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  await expect(
+    page.getByTestId("onboarding-relay-reconnect-card"),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("onboarding-relay-reconnect-card"),
+  ).toContainText("Can't reach the relay");
+});
+
+test("community access failures use the generic reconnect card", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      profileUpdateError: "relay unreachable: 403 Forbidden",
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  await expect(
+    page.getByTestId("onboarding-relay-reconnect-card"),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("onboarding-relay-reconnect-card"),
+  ).toContainText("Can't reach the relay");
+});
+
+test("dismissed relay save failures reappear on retry", async ({ page }) => {
+  const relayError = "relay unreachable: could not connect to relay";
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      profileUpdateErrors: [relayError, relayError],
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+  await expect(
+    page.getByTestId("onboarding-relay-reconnect-card"),
+  ).toBeVisible();
+
+  await page.getByTestId("onboarding-relay-reconnect-card").hover();
+  await page.getByTestId("onboarding-relay-reconnect-card-dismiss").click();
+  await expect(page.getByTestId("onboarding-relay-reconnect-card")).toHaveCount(
+    0,
+  );
+
+  await page.getByTestId("onboarding-next").click();
+  await expect(
+    page.getByTestId("onboarding-relay-reconnect-card"),
+  ).toBeVisible();
+});
+
+test("existing relay profile with display name auto-completes onboarding", async ({
+  page,
+}) => {
+  // A user whose relay profile already has a display name should skip
+  // onboarding entirely. they've already set up their identity previously
+  // (possibly on another machine or app data directory).
+  // Seed alice's pubkey into searchProfiles so seedMockSearchProfiles writes
+  // has_profile_event: true into mockProfiles. the harness-intended mechanism
+  // for simulating a returning user with a real kind:0 event. Do NOT use the
+  // static mockProfiles seed (removed in PR #1508); that path collides with
+  // FIRST_RUN_ALICE (same pubkey) and breaks the first-run onboarding specs.
+  await seedActiveIdentity(page, TEST_IDENTITIES.alice);
+  await installMockBridge(
+    page,
+    {
+      searchProfiles: [
+        { pubkey: TEST_IDENTITIES.alice.pubkey, displayName: "alice" },
+      ],
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await expect(page.getByTestId("onboarding-gate")).toHaveCount(0);
+  await expectHomeView(page);
+});
+
+test("open relay skips membership gating during onboarding", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      relayRequiresMembership: false,
+      relayRole: null,
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  await expect(page.getByTestId("onboarding-page-avatar")).toBeVisible();
+  await expect(page.getByTestId("membership-denied")).toHaveCount(0);
+});
+
+test("membership denial can import a different invited key", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      relayRequiresMembership: true,
+      relayRole: null,
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  await expect(page.getByTestId("membership-denied")).toBeVisible();
+  await page.getByTestId("membership-denied-change-key").click();
+
+  const importedNsec = nsecEncode(hexToBytes(TEST_IDENTITIES.alice.privateKey));
+  await page.getByTestId("membership-denied-nsec-input").fill(importedNsec);
+  await expect(
+    page.getByTestId("membership-denied-npub-preview"),
+  ).toBeVisible();
+  await page.getByTestId("membership-denied-import-key").click();
+
+  // Alice already has a relay profile with a display name, so after the
+  // identity swap the onboarding gate auto-completes.
+  // The identity swap must tear down the old relay socket through the native
+  // disconnect command before the replacement identity connects.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __BUZZ_E2E_COMMANDS__?: string[];
+            }
+          ).__BUZZ_E2E_COMMANDS__?.includes("plugin:websocket|disconnect") ??
+          false,
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      page.evaluate((storageKey) => {
+        const rawIdentity = window.localStorage.getItem(storageKey);
+        const identity = rawIdentity
+          ? (JSON.parse(rawIdentity) as { pubkey?: string })
+          : null;
+        return identity?.pubkey ?? null;
+      }, E2E_IDENTITY_OVERRIDE_STORAGE_KEY),
+    )
+    .toBe(TEST_IDENTITIES.alice.pubkey);
+  await expect(page.getByTestId("onboarding-gate")).toHaveCount(0);
+  await expectHomeView(page);
+});
+
+// Guards the signer-aware community boundary: replacing identity A with
+// identity B on the SAME relay (in-app key import) must rebuild the community
+// query client and re-bucket the draft store, so B never renders A's cached
+// data, never enumerates A's drafts, and never persists drafts into A's
+// bucket. Mutation-proof: removing the signer (pubkey/epoch) from
+// `communityKey` in App.tsx retains A's query client and draft bucket and
+// fails every leg below.
+test("same-relay identity replacement rebuilds the community boundary (A→B→A cache and draft isolation)", async ({
+  page,
+}) => {
+  // Two full boots (denied-A → imported-B, then relaunch-as-A) plus draft
+  // flush polling exceed the default budget.
+  test.slow();
+  const GENERAL_CHANNEL_ID = "9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50";
+  const DRAFT_STORE_KEY_PREFIX = "buzz-drafts.v2";
+  // Mirrors the bridge's DEFAULT_RELAY_WS_URL and useDrafts'
+  // canonicalizeRelayScope (scheme://host, no trailing slash).
+  const relayScope = (process.env.BUZZ_E2E_RELAY_URL ?? "http://localhost:3000")
+    .replace(/^http/, "ws")
+    .replace(/\/+$/, "");
+  const tylerDraftStoreKey = `${DRAFT_STORE_KEY_PREFIX}:${relayScope}:${TEST_IDENTITIES.tyler.pubkey}`;
+  const aliceDraftStoreKey = `${DRAFT_STORE_KEY_PREFIX}:${relayScope}:${TEST_IDENTITIES.alice.pubkey}`;
+
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      relayRequiresMembership: true,
+      relayRole: null,
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  // Seed a draft in tyler's identity-scoped bucket after boot, as if typed in
+  // an earlier session. Written directly to localStorage (not through the
+  // live store) so it exercises the persisted bucket, not the memory cache.
+  await page.evaluate(
+    ([draftStoreKey, channelId]) => {
+      const now = new Date().toISOString();
+      window.localStorage.setItem(
+        draftStoreKey,
+        JSON.stringify({
+          [channelId]: {
+            content: "tyler private draft",
+            selectionStart: 0,
+            selectionEnd: 0,
+            channelId,
+            createdAt: now,
+            updatedAt: now,
+            pendingImeta: [],
+            spoileredAttachmentUrls: [],
+            status: "active",
+          },
+        }),
+      );
+    },
+    [tylerDraftStoreKey, GENERAL_CHANNEL_ID] as const,
+  );
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+  await expect(page.getByTestId("membership-denied")).toBeVisible();
+
+  // Seed identity-unkeyed data into tyler's live community query client and
+  // capture the client instance so its replacement is provable.
+  await page.evaluate(() => {
+    const testWindow = window as Window & {
+      __BUZZ_E2E_QUERY_CLIENT__?: {
+        setQueryData: (key: unknown[], data: unknown) => void;
+      };
+      __BUZZ_E2E_PREVIOUS_QUERY_CLIENT__?: unknown;
+    };
+    const client = testWindow.__BUZZ_E2E_QUERY_CLIENT__;
+    if (!client) {
+      throw new Error("community query client seam is not installed");
+    }
+    // A key no production query uses: real keys (projects/channels) would be
+    // refetched by B's session and mask whether the CACHE was dropped.
+    client.setQueryData(
+      ["e2e-identity-boundary-probe"],
+      [{ id: "tyler-cached-project" }],
+    );
+    testWindow.__BUZZ_E2E_PREVIOUS_QUERY_CLIENT__ = client;
+  });
+
+  // Import alice (B) through the in-app denied-membership key swap.
+  await page.getByTestId("membership-denied-change-key").click();
+  const importedNsec = nsecEncode(hexToBytes(TEST_IDENTITIES.alice.privateKey));
+  await page.getByTestId("membership-denied-nsec-input").fill(importedNsec);
+  await expect(
+    page.getByTestId("membership-denied-npub-preview"),
+  ).toBeVisible();
+  await page.getByTestId("membership-denied-import-key").click();
+
+  await expect(page.getByTestId("onboarding-gate")).toHaveCount(0);
+  await expectHomeView(page);
+
+  // Leg 1. the community boundary was rebuilt for B: a fresh query client
+  // replaced tyler's, and the seeded cache entry did not survive into
+  // alice's session.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const testWindow = window as Window & {
+          __BUZZ_E2E_QUERY_CLIENT__?: {
+            getQueryData: (key: unknown[]) => unknown;
+          };
+          __BUZZ_E2E_PREVIOUS_QUERY_CLIENT__?: unknown;
+        };
+        const client = testWindow.__BUZZ_E2E_QUERY_CLIENT__;
+        if (!client) return "client-missing";
+        if (client === testWindow.__BUZZ_E2E_PREVIOUS_QUERY_CLIENT__) {
+          return "client-retained";
+        }
+        return client.getQueryData(["e2e-identity-boundary-probe"]) ===
+          undefined
+          ? "rebuilt"
+          : "cache-retained";
+      }),
+    )
+    .toBe("rebuilt");
+
+  // Leg 2. alice opens the channel tyler's seeded draft targets: the
+  // composer must not restore another identity's draft.
+  await page.getByTestId("channel-general").click();
+  const composerInput = page.getByTestId("message-input");
+  await expect(composerInput).toBeVisible();
+  await expect(composerInput).not.toContainText("tyler private draft");
+
+  // A draft typed by alice persists in alice's bucket, never tyler's. Draft
+  // persistence flushes on composer teardown, so switch channels after typing.
+  await composerInput.fill("alice draft after import");
+  await page.getByTestId("channel-random").click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ([aliceKey, tylerKey]) => {
+          const aliceStore = window.localStorage.getItem(aliceKey) ?? "";
+          const tylerStore = window.localStorage.getItem(tylerKey) ?? "";
+          return {
+            aliceHasDraft: aliceStore.includes("alice draft after import"),
+            tylerBucketLeaked: tylerStore.includes("alice draft after import"),
+            tylerDraftIntact: tylerStore.includes("tyler private draft"),
+          };
+        },
+        [aliceDraftStoreKey, tylerDraftStoreKey] as const,
+      ),
+    )
+    .toEqual({
+      aliceHasDraft: true,
+      tylerBucketLeaked: false,
+      tylerDraftIntact: true,
+    });
+
+  // Leg 3. alice's own draft restores from alice's bucket, and her first
+  // send succeeds. The mock's send handler asserts the frontend-captured
+  // signer against the active identity, so a send that still carried tyler's
+  // cached identity would be rejected and never render.
+  await page.getByTestId("channel-general").click();
+  await expect(composerInput).toContainText("alice draft after import");
+  await composerInput.fill("hello from alice");
+  await composerInput.press("Enter");
+  await expect(page.getByText("hello from alice").first()).toBeVisible();
+  await expect(composerInput).not.toContainText("hello from alice");
+
+  // Leg 4. A restoration: relaunch as tyler (fully onboarded this time,
+  // open relay) on the same relay. Tyler's bucket must restore tyler's
+  // draft untouched by alice's session, and alice's draft must stay in
+  // alice's bucket. Tyler is not a member of the mock starter channels, so
+  // reach general through the channel browser.
+  await seedActiveIdentity(page, TEST_IDENTITIES.tyler);
+  await installMockBridge(page);
+  await page.goto("/");
+
+  await openChannelBrowser(page);
+  await expect(page.getByTestId("channel-browser-dialog")).toBeVisible();
+  await page
+    .getByTestId("browse-channel-general")
+    .getByRole("button", { name: "Join" })
+    .click();
+  await expect(page.getByTestId("chat-title")).toHaveText("general");
+  await expect(composerInput).toContainText("tyler private draft");
+  await expect(composerInput).not.toContainText("alice draft after import");
+});
+
+test("onboarding relay reconnect. click shows Connected then auto-dismisses", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 500 });
+  // Produce the relay reconnect card via a relay-unreachable profile save error.
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      profileUpdateError: "relay unreachable: could not connect to relay",
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  const card = page.getByTestId("onboarding-relay-reconnect-card");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Can't reach the relay");
+
+  // Drive degraded before clicking so the card is in the expected error state.
+  await setRelayConnectionState(page, "disconnected");
+
+  // Click the reconnect button. The controller attempts reconnect; the mock
+  // relay reconnects successfully (fast-path or via the state seam). Either
+  // path should result in the card transitioning to Connected and then
+  // auto-dismissing.
+  await page.getByTestId("onboarding-reconnect-relay").click();
+
+  // Drive connected to ensure the controller's connection-state path fires
+  // and the component's hadActiveReconnectRef guard is satisfied.
+  await setRelayConnectionState(page, "connected");
+
+  await expect(card).toContainText("Connected", { timeout: 5_000 });
+  await expect(card).not.toContainText("Can't reach the relay");
+
+  // Auto-dismiss fires after ONBOARDING_CONNECTIVITY_SUCCESS_AUTO_DISMISS_MS
+  // (2500ms). Allow generous headroom for CI.
+  await expect(card).toBeHidden({ timeout: 10_000 });
+});
+
+test("onboarding relay reconnect. dismiss is clickable at minimum size", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 500 });
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      profileUpdateError: "relay unreachable: could not connect to relay",
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+  const card = page.getByTestId("onboarding-relay-reconnect-card");
+  await expect(card).toBeVisible();
+  await page
+    .getByRole("button", { name: "Dismiss relay notification" })
+    .click();
+  await expect(card).toHaveCount(0);
+});
+
+test("onboarding relay reconnect. connected without a prior click does not show Connected", async ({
+  page,
+}) => {
+  // Tests the hadActiveReconnectRef guard: if the relay transitions to
+  // "connected" without the user having clicked the reconnect button, the card
+  // must NOT show Connected. This guards against spurious success on initial
+  // connection or background recovery with no user action.
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      profileUpdateError: "relay unreachable: could not connect to relay",
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  const card = page.getByTestId("onboarding-relay-reconnect-card");
+  await expect(card).toBeVisible();
+
+  // Drive to disconnected state (no reconnect click has happened).
+  await setRelayConnectionState(page, "disconnected");
+
+  // Drive to connected WITHOUT clicking. this would happen on a spontaneous
+  // background recovery. The hadActiveReconnectRef guard must block markSuccess().
+  await setRelayConnectionState(page, "connected");
+
+  // Wait long enough for any spurious markSuccess() to fire, then assert the
+  // card stayed in the error state.
+  await page.waitForTimeout(500);
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Can't reach the relay");
+  await expect(card).not.toContainText("Connected");
+});
+
+test("membership denied shows all four affordances and change-community edits non-destructively", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      relayRequiresMembership: true,
+      relayRole: null,
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  // Fill the display name and advance. membership check triggers denial.
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+
+  // Membership-denied screen renders with all four affordances.
+  const denied = page.getByTestId("membership-denied");
+  await expect(denied).toBeVisible();
+  await expect(denied.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(denied.getByRole("button", { name: "Back" })).toBeVisible();
+  await expect(
+    denied.getByRole("button", { name: "Change community" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("membership-denied-change-key")).toBeVisible();
+  await expect(
+    page.getByTestId("membership-denied-redeem-invite"),
+  ).toBeVisible();
+
+  // Click "Change community" → the overlay opens.
+  await denied.getByRole("button", { name: "Change community" }).click();
+  const overlay = page.getByTestId("community-change-overlay");
+  await expect(overlay).toBeVisible();
+
+  // Change the relay URL to a new one. The probe will time out for a fake URL
+  // so we wait for the "Use anyway" button.
+  await overlay
+    .locator("#community-edit-url")
+    .fill("wss://new-relay.example.com");
+  await overlay.getByRole("button", { name: "Save changes" }).click();
+
+  // The fields are frozen while the probe is pending, so the saved URL and
+  // any warning cannot get out of sync with a subsequent edit.
+  await expect(overlay.locator("#community-edit-url")).toBeDisabled();
+  await expect(overlay.locator("#community-edit-name")).toBeDisabled();
+  await expect(
+    overlay.getByRole("button", { name: "Use anyway" }),
+  ).toBeVisible();
+  await overlay.getByRole("button", { name: "Use anyway" }).click();
+
+  // The community update triggers a remount (reinitKey bump). The persisted
+  // community should now point to the new relay URL.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = window.localStorage.getItem("buzz-communities");
+        const communities = raw
+          ? (JSON.parse(raw) as Array<{ relayUrl?: string }>)
+          : [];
+        return communities[0]?.relayUrl ?? null;
+      }),
+    )
+    .toBe("wss://new-relay.example.com");
+
+  // Identity was NOT wiped. the override storage key is still intact.
+  await expect
+    .poll(() =>
+      page.evaluate((storageKey) => {
+        return window.localStorage.getItem(storageKey) !== null;
+      }, E2E_IDENTITY_OVERRIDE_STORAGE_KEY),
+    )
+    .toBe(true);
+});
+
+test("cancel from profile Back preserves drafts and denied Back returns to interrupted page", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      relayRequiresMembership: true,
+      relayRole: null,
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  // --- Profile step: Back opens community-change overlay ---
+  const nameInput = page.getByTestId("onboarding-display-name");
+  await nameInput.fill("Morty QA");
+  await page.getByTestId("onboarding-back").click();
+
+  // The community change overlay should open.
+  const overlay = page.getByTestId("community-change-overlay");
+  await expect(overlay).toBeVisible();
+
+  // Cancel the overlay. profile should still be visible with the name intact.
+  await overlay.getByRole("button", { name: "Cancel" }).click();
+  await expect(overlay).toHaveCount(0);
+  await expect(page.getByTestId("onboarding-page-1")).toBeVisible();
+  await expect(nameInput).toHaveValue("Morty QA");
+
+  // --- Profile → membership denied → Back returns to profile ---
+  // Advance triggers membership check → denied (relayRole is null).
+  await page.getByTestId("onboarding-next").click();
+  await expect(page.getByTestId("membership-denied")).toBeVisible();
+
+  // Press Back on the denied screen. should return to the profile page
+  // (deniedFromPage = "profile") with the name draft intact.
+  await page
+    .getByTestId("membership-denied")
+    .getByRole("button", { name: "Back" })
+    .click();
+  await expect(page.getByTestId("onboarding-page-1")).toBeVisible();
+  await expect(nameInput).toHaveValue("Morty QA");
+});
+
+test("denied on relay A then paste relay B invite URL switches community to B", async ({
+  page,
+}) => {
+  await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
+  await installMockBridge(
+    page,
+    {
+      relayRequiresMembership: true,
+      relayRole: null,
+    },
+    { skipOnboardingSeed: true },
+  );
+  await page.goto("/");
+
+  // Record the initial relay URL (relay A).
+  const initialRelayUrl = await page.evaluate(() => {
+    const raw = window.localStorage.getItem("buzz-communities");
+    const communities = raw
+      ? (JSON.parse(raw) as Array<{ relayUrl?: string }>)
+      : [];
+    return communities[0]?.relayUrl ?? null;
+  });
+  expect(initialRelayUrl).not.toBeNull();
+
+  // Fill name, advance → denied on relay A.
+  await page.getByTestId("onboarding-display-name").fill("Morty QA");
+  await page.getByTestId("onboarding-next").click();
+  await expect(page.getByTestId("membership-denied")).toBeVisible();
+
+  // Intercept the claimInvite POST to relay B so it succeeds.
+  const relayBUrl = "wss://relay-b.example.com";
+  const relayBHttpUrl = "https://relay-b.example.com";
+  const policyReceipt = "relay-signed-policy-receipt";
+  await page.route(`${relayBHttpUrl}/api/join-policy`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        policy: {
+          terms_markdown: "# Terms",
+          privacy_markdown: "# Privacy",
+          age_attestation_required: true,
+          version: "policy-v1",
+        },
+      }),
+    });
+  });
+  await page.route(
+    `${relayBHttpUrl}/api/invites/accept-policy`,
+    async (route) => {
+      expect(route.request().postDataJSON()).toEqual({
+        code: "test-invite-code",
+        policy_version: "policy-v1",
+        age_confirmed: true,
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ receipt: policyReceipt }),
+      });
+    },
+  );
+  await page.route(`${relayBHttpUrl}/api/invites/claim`, async (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({
+      code: "test-invite-code",
+      policy_receipt: policyReceipt,
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "joined",
+        community_id: "mock-community",
+        host: "relay-b.example.com",
+        role: "member",
+      }),
+    });
+  });
+
+  // Click "Have an invite?" and enter an HTTPS invite URL for relay B.
+  await page.getByTestId("membership-denied-redeem-invite").click();
+  await page
+    .getByTestId("invite-redeem-input")
+    .fill(`${relayBHttpUrl}/invite/test-invite-code`);
+  await page.getByTestId("invite-redeem-submit").click();
+  await expect(page.getByText("I am 18 years of age or older.")).toBeVisible();
+  await page.getByLabel("I am 18 years of age or older.").check();
+  await page
+    .getByLabel("I agree to the Colony Terms of Service and Privacy Policy.")
+    .check();
+  await page.getByTestId("invite-redeem-submit").click();
+
+  // After successful claim, relay B is added and becomes active; relay A remains
+  // in the community list for future switching.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = window.localStorage.getItem("buzz-communities");
+        const activeCommunityId = window.localStorage.getItem(
+          "buzz-active-community-id",
+        );
+        const communities = raw
+          ? (JSON.parse(raw) as Array<{ id?: string; relayUrl?: string }>)
+          : [];
+        return communities.find(({ id }) => id === activeCommunityId)?.relayUrl;
+      }),
+    )
+    .toBe(relayBUrl);
+});

@@ -1,0 +1,255 @@
+//! Compile-time identity for reusable named demo builds.
+//!
+//! Production builds leave `BUZZ_DESKTOP_BUILD_DEMO_SLUG` unset and retain all
+//! existing names. The demo recipe validates one slug and `build.rs` bakes it
+//! into the binary; every runtime identity is then derived from that one value.
+
+use std::borrow::Cow;
+
+pub(crate) fn demo_slug() -> Option<&'static str> {
+    option_env!("BUZZ_DESKTOP_BUILD_DEMO_SLUG")
+}
+
+pub(crate) fn is_demo_build() -> bool {
+    demo_slug().is_some()
+}
+
+pub(crate) const DEMO_AGENT_CONFIG_ENV: &str = "BUZZ_AGENT_CONFIG_DIR";
+
+pub(crate) fn demo_config_home() -> Result<Option<std::path::PathBuf>, String> {
+    demo_config_home_for(demo_slug(), dirs::config_dir())
+}
+
+pub(crate) fn demo_agent_oauth_cache_dir() -> Result<Option<std::path::PathBuf>, String> {
+    Ok(demo_config_home()?.map(|dir| dir.join("buzz-agent").join("oauth")))
+}
+
+/// Keep child config caches inside this demo build's identity. In particular,
+/// bundled buzz-agent OAuth tokens must not read or write production's root.
+/// Refuse launch if a demo cannot resolve its root; None means production only.
+pub(crate) fn apply_demo_config_home(command: &mut std::process::Command) -> Result<(), String> {
+    if let Some(config_home) = demo_config_home()? {
+        command.env(DEMO_AGENT_CONFIG_ENV, config_home);
+    }
+    Ok(())
+}
+
+fn demo_config_home_for(
+    demo_slug: Option<&str>,
+    config_dir: Option<std::path::PathBuf>,
+) -> Result<Option<std::path::PathBuf>, String> {
+    match demo_slug {
+        None => Ok(None),
+        Some(slug) => config_dir
+            .map(|dir| Some(dir.join(format!("buzz-demo-{slug}"))))
+            .ok_or_else(|| "cannot resolve demo credential directory".to_string()),
+    }
+}
+
+/// URL schemes this build answers. Production answers its own `colony` scheme
+/// and the legacy `buzz` scheme that links minted before `colony://` still use.
+/// A named demo build answers only its own scheme so it can never claim a
+/// production link.
+fn accepted_deep_link_schemes(demo_slug: Option<&str>) -> Vec<String> {
+    match demo_slug {
+        Some(slug) => vec![format!("buzz-demo-{slug}")],
+        None => vec!["buzz".to_string(), "colony".to_string()],
+    }
+}
+
+pub(crate) fn is_deep_link_scheme_for_build(scheme: &str) -> bool {
+    accepted_deep_link_schemes(demo_slug())
+        .iter()
+        .any(|accepted| accepted.as_str() == scheme)
+}
+
+pub(crate) fn is_deep_link_for_build(value: &str) -> bool {
+    accepted_deep_link_schemes(demo_slug())
+        .iter()
+        .any(|scheme| is_deep_link_for_scheme(value, scheme))
+}
+
+fn is_deep_link_for_scheme(value: &str, scheme: &str) -> bool {
+    value
+        .strip_prefix(scheme)
+        .is_some_and(|suffix| suffix.starts_with("://"))
+}
+
+pub(crate) fn keyring_service() -> Cow<'static, str> {
+    demo_slug()
+        .map(|slug| Cow::Owned(format!("buzz-desktop-demo.{slug}")))
+        .unwrap_or(Cow::Borrowed("buzz-desktop"))
+}
+
+/// Folder name of the production agent home ("nest") that new installs create.
+const PRODUCTION_NEST_NAME: &str = ".colony";
+
+/// Folder name production installs used before the Colony name. An install that
+/// already has it keeps using it until a separate, gated migration moves it.
+const LEGACY_PRODUCTION_NEST_NAME: &str = ".buzz";
+
+/// Preferred nest folder name for this build, the name a fresh install gets.
+///
+/// Production is `.colony`; dev builds keep `.buzz-dev` and demo builds keep
+/// `.buzz-demo-<slug>`. A production install that already has a legacy folder
+/// is steered by [`legacy_nest_name`] through
+/// `managed_agents::nest_folder::choose_nest_folder`, not by this function.
+pub(crate) fn nest_name(is_dev: bool) -> Cow<'static, str> {
+    nest_name_for(demo_slug(), is_dev)
+}
+
+fn nest_name_for(demo_slug: Option<&str>, is_dev: bool) -> Cow<'_, str> {
+    if let Some(slug) = demo_slug {
+        Cow::Owned(format!(".buzz-demo-{slug}"))
+    } else if is_dev {
+        Cow::Borrowed(".buzz-dev")
+    } else {
+        Cow::Borrowed(PRODUCTION_NEST_NAME)
+    }
+}
+
+/// The earlier nest folder name this build may still find on disk and must keep
+/// using when it exists. Only production builds ever used `.buzz` as their
+/// nest: dev and demo builds were always namespaced, so they return `None`.
+pub(crate) fn legacy_nest_name(is_dev: bool) -> Option<&'static str> {
+    legacy_nest_name_for(demo_slug(), is_dev)
+}
+
+fn legacy_nest_name_for(demo_slug: Option<&str>, is_dev: bool) -> Option<&'static str> {
+    (demo_slug.is_none() && !is_dev).then_some(LEGACY_PRODUCTION_NEST_NAME)
+}
+
+/// Every folder name a production install can have used as its nest, newest
+/// first. Read-only lookups that must work for any production install, such as
+/// a dev build finding the repositories the installed app cloned, search all of
+/// them.
+pub(crate) fn production_nest_names() -> [&'static str; 2] {
+    [PRODUCTION_NEST_NAME, LEGACY_PRODUCTION_NEST_NAME]
+}
+
+pub(crate) fn cli_name(is_dev: bool) -> String {
+    if let Some(slug) = demo_slug() {
+        format!("buzz-demo-{slug}")
+    } else if is_dev {
+        "buzz-dev".to_string()
+    } else {
+        "buzz".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "compiled with BUZZ_BUILD_DEMO_SLUG by the compiled-flags recipe"]
+    fn compiled_demo_slug_matches_expected() {
+        let expected = std::env::var("BUZZ_TEST_EXPECTED_DEMO_SLUG")
+            .expect("BUZZ_TEST_EXPECTED_DEMO_SLUG must be set");
+        assert_eq!(demo_slug(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn ordinary_release_defaults_remain_production_identity() {
+        if demo_slug().is_none() {
+            assert_eq!(
+                accepted_deep_link_schemes(demo_slug()),
+                vec!["buzz", "colony"]
+            );
+            assert_eq!(keyring_service(), "buzz-desktop");
+            assert_eq!(nest_name(false), ".colony");
+            assert_eq!(legacy_nest_name(false), Some(".buzz"));
+            assert_eq!(cli_name(false), "buzz");
+        }
+    }
+
+    #[test]
+    fn demo_agent_config_and_oauth_roots_are_build_scoped() {
+        let base = std::path::PathBuf::from("/Users/demo/Library/Application Support");
+        assert_eq!(
+            demo_config_home_for(None, Some(base.clone())).unwrap(),
+            None
+        );
+        let first = demo_config_home_for(Some("board-1234567812345678"), Some(base.clone()))
+            .unwrap()
+            .unwrap();
+        let second = demo_config_home_for(Some("board-8765432187654321"), Some(base))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            first,
+            std::path::PathBuf::from(
+                "/Users/demo/Library/Application Support/buzz-demo-board-1234567812345678"
+            )
+        );
+        assert_eq!(
+            first.join("buzz-agent/oauth"),
+            std::path::PathBuf::from(
+                "/Users/demo/Library/Application Support/buzz-demo-board-1234567812345678/buzz-agent/oauth"
+            )
+        );
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn unresolved_demo_credentials_never_select_production_defaults() {
+        assert_eq!(demo_config_home_for(None, None).unwrap(), None);
+        assert_eq!(
+            demo_config_home_for(Some("board-1234567812345678"), None),
+            Err("cannot resolve demo credential directory".to_string())
+        );
+    }
+
+    #[test]
+    fn duplicate_instance_links_follow_the_build_scheme() {
+        assert!(is_deep_link_for_scheme("buzz://message?id=1", "buzz"));
+        assert!(!is_deep_link_for_scheme(
+            "buzz-demo-board-1234567812345678://message?id=1",
+            "buzz"
+        ));
+        assert!(is_deep_link_for_scheme(
+            "buzz-demo-board-1234567812345678://message?id=1",
+            "buzz-demo-board-1234567812345678"
+        ));
+        assert!(!is_deep_link_for_scheme(
+            "buzz://message?id=1",
+            "buzz-demo-board-1234567812345678"
+        ));
+    }
+
+    #[test]
+    fn production_answers_colony_and_legacy_schemes_but_demos_only_their_own() {
+        assert_eq!(accepted_deep_link_schemes(None), vec!["buzz", "colony"]);
+        assert_eq!(
+            accepted_deep_link_schemes(Some("board-1234567812345678")),
+            vec!["buzz-demo-board-1234567812345678"]
+        );
+    }
+
+    #[test]
+    fn production_and_named_demo_nests_are_distinct() {
+        assert_eq!(nest_name_for(None, false), ".colony");
+        assert_eq!(nest_name_for(None, true), ".buzz-dev");
+        assert_eq!(
+            nest_name_for(Some("workstream-board"), false),
+            ".buzz-demo-workstream-board"
+        );
+        assert_eq!(
+            nest_name_for(Some("second-demo"), false),
+            ".buzz-demo-second-demo"
+        );
+    }
+
+    #[test]
+    fn only_production_has_a_legacy_nest_name() {
+        assert_eq!(legacy_nest_name_for(None, false), Some(".buzz"));
+        assert_eq!(legacy_nest_name_for(None, true), None);
+        assert_eq!(legacy_nest_name_for(Some("workstream-board"), false), None);
+        assert_eq!(legacy_nest_name_for(Some("workstream-board"), true), None);
+    }
+
+    #[test]
+    fn production_nest_names_list_new_name_first() {
+        assert_eq!(production_nest_names(), [".colony", ".buzz"]);
+    }
+}

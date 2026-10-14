@@ -1,0 +1,198 @@
+import path from "node:path";
+import { createSubscriptionService } from "./ai-subscriptions.mjs";
+import { requestClaudeCredential } from "./claude-credential-access.mjs";
+import {
+  BrowserWindow,
+  Notification,
+  app,
+  clipboard,
+  dialog,
+  nativeTheme,
+  shell,
+} from "electron";
+import { createOpenRouterService } from "./openrouter-oauth.mjs";
+import { CHATGPT_COMMANDS, dispatchChatGpt } from "./chatgpt/ipc.mjs";
+import {
+  createWorkspaceFileService,
+  WORKSPACE_FILE_COMMANDS,
+} from "./workspace-files.mjs";
+import { RendererHost } from "./renderer-host.mjs";
+import { createShellPlugins } from "./shell-plugins.mjs";
+import { validWindowLabel } from "./window-rules.mjs";
+
+export { applyWindowAction, validWindowLabel } from "./window-rules.mjs";
+
+const DRAG_REGION_CSS =
+  "[data-tauri-drag-region]{-webkit-app-region:drag} [data-tauri-drag-region] button,[data-tauri-drag-region] input,[data-tauri-drag-region] a{-webkit-app-region:no-drag}";
+
+/**
+ * One app window: its own renderer generation fence and shell plugins over the
+ * shared native host. The renderer learns its label from the preload so the
+ * Tauri window API (`getCurrentWindow().label`) keeps working per window.
+ */
+export function createAppWindow({
+  label,
+  host,
+  desktop,
+  trusted,
+  onUntrustedOpen,
+  browserOptions = {},
+  chatGpt,
+  browserTabEnabled = true,
+}) {
+  if (!validWindowLabel(label)) throw new Error("Invalid window label");
+  const main = label === "main";
+  const window = new BrowserWindow({
+    show: false,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#17151b" : "#ffffff",
+    // macOS and Windows take the icon from the app bundle or executable.
+    ...(process.platform === "linux"
+      ? { icon: path.join(desktop, "src-tauri", "icons", "icon.png") }
+      : {}),
+    ...browserOptions,
+    webPreferences: {
+      preload: path.join(desktop, "electron", "preload.cjs"),
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      additionalArguments: [
+        `--colony-window-label=${label}`,
+        ...(browserTabEnabled ? [] : ["--colony-browser-tab=0"]),
+      ],
+    },
+  });
+  const rendererHost = new RendererHost(
+    host,
+    main ? undefined : { resetCommands: [] },
+  );
+  const send = (message) => {
+    if (!window.isDestroyed()) window.webContents.send("colony:event", message);
+  };
+  const shellPlugins = createShellPlugins({
+    app,
+    shell,
+    clipboard,
+    dialog,
+    Notification,
+    backgroundMode: process.env.COLONY_ELECTRON_BACKGROUND === "1",
+    nativeTheme,
+    getWindow: () => window,
+    emit: (event, payload) => send({ type: "shell-event", event, payload }),
+  });
+  const openRouter = createOpenRouterService({
+    openExternal: (url) => shell.openExternal(url),
+    bringToFront: () => {
+      if (!window.isDestroyed()) {
+        window.show();
+        window.focus();
+      }
+    },
+    invoke: (command, args) => host.request("invoke", { command, args }),
+  });
+  const subscriptions = createSubscriptionService({
+    requestClaudeCredential: () =>
+      requestClaudeCredential({
+        confirm: (options) => dialog.showMessageBox(window, options),
+        alive: () => !window.isDestroyed(),
+      }),
+  });
+  const workspaceFiles = createWorkspaceFileService({
+    invoke: (command, args) =>
+      rendererHost.request("invoke", { command, args }),
+  });
+  window.on("closed", () => {
+    openRouter.cancel();
+    if (main) chatGpt?.cancel();
+  });
+  const disposeWindowEvents = shellPlugins.attachWindowEvents(window);
+  rendererHost.on("event", send);
+  rendererHost.on("channel", send);
+
+  window.webContents.on("will-navigate", (event, url) => {
+    if (!trusted(url)) event.preventDefault();
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    onUntrustedOpen(url);
+    return { action: "deny" };
+  });
+  let initialNavigation = true;
+  window.webContents.on("did-start-navigation", (details) => {
+    if (!details.isMainFrame || details.isSameDocument) return;
+    if (initialNavigation) {
+      initialNavigation = false;
+      return;
+    }
+    openRouter.cancel();
+    if (main) chatGpt?.cancel();
+    // A reload retires the previous renderer's subscriptions and channels
+    // before the new one may issue commands.
+    void rendererHost.reset().catch(() => {
+      send({
+        type: "shell",
+        name: "disconnected",
+        payload: "Native renderer cleanup failed; restart the app",
+      });
+    });
+  });
+
+  /** Handle one renderer request that already passed the sender check. */
+  async function dispatch(type, payload) {
+    if (type === "invoke" && CHATGPT_COMMANDS.has(payload.command)) {
+      const generation = rendererHost.generation;
+      const result = await dispatchChatGpt(
+        chatGpt,
+        payload.command,
+        payload.args,
+        main,
+      );
+      rendererHost.check(generation);
+      return result;
+    }
+    if (type === "invoke" && WORKSPACE_FILE_COMMANDS.has(payload.command)) {
+      const generation = rendererHost.generation;
+      const result = await workspaceFiles[
+        WORKSPACE_FILE_COMMANDS.get(payload.command)
+      ](payload.args);
+      rendererHost.check(generation);
+      return result;
+    }
+    if (type === "invoke" && main) {
+      switch (payload.command) {
+        case "get_ai_subscriptions":
+          return subscriptions.read();
+        case "check_claude_subscription":
+          return subscriptions.readClaude();
+        case "connect_openrouter":
+          return openRouter.connect();
+        case "cancel_openrouter":
+          return openRouter.cancel();
+        case "get_openrouter_connection":
+          return openRouter.status();
+        case "select_openrouter_model":
+          return openRouter.select(payload.args?.model);
+        case "test_openrouter_connection":
+          return openRouter.test();
+      }
+    }
+    if (type === "invoke" && shellPlugins.handles(payload.command))
+      return shellPlugins.invoke(payload.command, payload.args ?? {});
+    if (["invoke", "listen", "unlisten", "emit"].includes(type))
+      return rendererHost.request(type, payload);
+    throw new Error("Unsupported desktop request");
+  }
+
+  async function load(url) {
+    await window.loadURL(url);
+    await window.webContents.insertCSS(DRAG_REGION_CSS);
+  }
+
+  /** Retire this window's native subscriptions; the host keeps running. */
+  async function dispose() {
+    openRouter.cancel();
+    if (main) chatGpt?.cancel();
+    disposeWindowEvents();
+    if (!main) await rendererHost.reset().catch(() => {});
+  }
+
+  return { label, window, send, dispatch, load, dispose, rendererHost };
+}

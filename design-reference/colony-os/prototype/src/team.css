@@ -1,0 +1,588 @@
+/* Team shares the approved Manrope and neutral workspace foundations. */
+.team-panel {
+  padding-top: 28px;
+}
+.team-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 0 20px;
+}
+.team-section-heading h2 {
+  font-size: 1.4rem;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  margin: 5px 0;
+}
+.team-section-heading p,
+.team-secondary-note,
+.team-empty-line {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.team-empty-line {
+  padding: 32px 0;
+}
+.team-section-heading .button {
+  font-size: 0.82rem;
+}
+.team-goal {
+  font-size: 1.15rem;
+  margin: 14px 0;
+}
+.plan-status {
+  font-size: 0.87rem;
+  color: var(--accent);
+  margin: 10px 0 16px;
+}
+.plan-progress {
+  font-size: 0.88rem;
+  font-weight: 650;
+  margin: 28px 0 15px;
+}
+.plan-week {
+  margin: 24px 0;
+}
+.plan-week h3,
+.previous-plans h3,
+.settings-section h3,
+.team-form h3 {
+  font-size: 0.92rem;
+  margin: 0 0 12px;
+}
+.plan-item {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 120px 90px;
+  gap: 14px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+  font-size: 0.88rem;
+}
+.plan-item-status {
+  font-size: 0.73rem;
+  color: var(--muted);
+}
+.plan-item-status.done {
+  color: var(--accent);
+}
+.plan-item small {
+  display: block;
+  color: var(--warning-ink);
+  font-size: 0.72rem;
+}
+.plan-item time {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.plan-item .button {
+  font-size: 0.75rem;
+  padding: 4px 0;
+}
+.plan-footnotes {
+  margin: 28px 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.plan-footnotes p {
+  margin: 7px 0;
+}
+.plan-note {
+  padding: 12px 0;
+  font-size: 0.88rem;
+}
+.previous-plans {
+  border-top: 1px solid var(--line);
+  padding: 20px 0;
+}
+.previous-plans .button {
+  gap: 20px;
+  font-size: 0.83rem;
+  padding-left: 0;
+}
+.previous-plans .button span {
+  color: var(--muted);
+}
+.routine-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--line);
+}
+.routine-row:first-child {
+  border-top: 1px solid var(--line);
+}
+.routine-row h3 {
+  font-size: 1rem;
+  margin: 0 0 5px;
+  font-weight: 650;
+}
+.routine-row p {
+  font-size: 0.88rem;
+  margin: 4px 0;
+}
+.routine-row small {
+  display: block;
+  font-size: 0.77rem;
+  color: var(--muted);
+  margin: 4px 0;
+}
+.routine-actions {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.routine-actions .button {
+  font-size: 0.8rem;
+}
+.routine-switch {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.8rem;
+  min-width: 64px;
+  min-height: 36px;
+}
+.routine-switch span {
+  width: 30px;
+  height: 18px;
+  border: 1px solid var(--control-line);
+  border-radius: 20px;
+  position: relative;
+}
+.routine-switch span:after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  left: 3px;
+  top: 3px;
+}
+.routine-switch[aria-checked="true"] span {
+  background: var(--accent-soft);
+}
+.routine-switch[aria-checked="true"] span:after {
+  left: 15px;
+  background: var(--accent);
+}
+.team-secondary-note {
+  margin: 24px 0 12px;
+}
+.team-secondary-note .button {
+  font-size: inherit;
+  display: inline-flex;
+  padding: 0 4px;
+  min-height: 24px;
+}
+.activity-filters {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
+  margin: 4px 0 26px;
+}
+.activity-filters button {
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 10px 0 12px;
+  border-bottom: 2px solid transparent;
+}
+.activity-filters .selected {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.activity-days section {
+  margin: 24px 0;
+}
+.activity-days h3 {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 550;
+  margin-bottom: 7px;
+}
+.activity-line {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 50px 58px;
+  gap: 15px;
+  align-items: start;
+  padding: 17px 0;
+  border-bottom: 1px solid var(--line);
+}
+.activity-line time,
+.activity-line > span {
+  color: var(--muted);
+  font-size: 0.73rem;
+  padding-top: 4px;
+}
+.activity-line p {
+  font-size: 0.9rem;
+  margin: 0 0 5px;
+}
+.activity-line small {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.activity-line .button {
+  font-size: 0.76rem;
+  padding: 1px 0;
+  min-height: 28px;
+}
+.team-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 20px;
+}
+.team-form input,
+.team-form select {
+  font-size: 0.9rem;
+  font-weight: 450;
+  min-height: 40px;
+}
+.team-form fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.team-settings-form {
+  max-width: 760px;
+}
+.settings-name-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32px;
+}
+.fixed-role > span {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.fixed-role p {
+  font-size: 0.9rem;
+  margin: 15px 0;
+}
+.settings-portrait {
+  margin: 10px 0 28px;
+}
+.settings-portrait p {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 4px 0 14px;
+}
+.ant-choices {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ant-choices button {
+  border: 1px solid transparent;
+  border-radius: 14px;
+  padding: 7px;
+}
+.ant-choices [aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ant-choices .portrait.large {
+  width: 58px;
+}
+.ant-choices .portrait.large .avatar {
+  width: 58px;
+  height: 58px;
+}
+.ant-choices .portrait-label {
+  font-size: 0.56rem;
+}
+.settings-budget {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 32px;
+  margin-bottom: 10px;
+}
+.settings-budget p {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 5px 0;
+}
+.settings-budget > div {
+  padding-top: 22px;
+}
+.settings-section {
+  border-top: 1px solid var(--line);
+  margin-top: 28px;
+  padding-top: 22px;
+  max-width: 760px;
+}
+.settings-section p {
+  font-size: 0.83rem;
+  color: var(--muted);
+  margin: 7px 0;
+}
+.settings-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 25px;
+  padding: 13px 0;
+}
+.settings-action-row strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.settings-action-row .button {
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.never-alone {
+  padding: 0;
+  list-style: none;
+}
+.never-alone li {
+  font-size: 0.85rem;
+  margin: 9px 0;
+  padding-left: 16px;
+  position: relative;
+}
+.never-alone li:before {
+  content: "·";
+  position: absolute;
+  left: 1px;
+}
+.settings-let-go {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.settings-let-go .button {
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.settings-save-error {
+  padding: 15px 0;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+.team-confirm {
+  max-width: 500px;
+}
+.team-confirm h2 {
+  font-size: 1.5rem;
+  letter-spacing: -0.04em;
+  margin: 0 0 15px;
+}
+.team-confirm p {
+  font-size: 0.93rem;
+  color: var(--muted);
+  margin: 12px 0 22px;
+}
+.team-confirm .team-form {
+  margin-top: 24px;
+}
+.team-confirm .button-row {
+  justify-content: flex-end;
+}
+.direct-page {
+  max-width: 970px;
+  margin: 0 auto;
+  padding: 24px 42px 20px;
+  min-height: calc(100vh - 70px);
+  display: flex;
+  flex-direction: column;
+}
+.direct-heading {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.direct-heading > .button:last-child {
+  margin-left: auto;
+  font-size: 0.8rem;
+}
+.direct-rule {
+  font-size: 0.78rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding: 17px 0;
+  margin: 0;
+}
+.direct-scroll {
+  flex: 1;
+  min-height: 200px;
+  max-height: calc(100vh - 335px);
+  overflow: auto;
+  padding: 24px 12px 30px 0;
+  overscroll-behavior: contain;
+}
+.direct-message {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 14px;
+  margin: 0 0 25px;
+}
+.direct-message .portrait {
+  width: 36px;
+}
+.direct-message .avatar {
+  width: 36px;
+  height: 36px;
+}
+.direct-message p {
+  font-size: 1rem;
+  margin: 5px 0 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.direct-message .message-status {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.direct-first {
+  text-align: center;
+  max-width: 420px;
+  margin: 25px auto;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.direct-first > .portrait {
+  margin: auto;
+}
+.direct-card {
+  margin: 0 0 24px 52px;
+}
+.direct-compose {
+  padding-top: 12px;
+}
+.direct-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 10px 0;
+}
+.direct-waiting p {
+  margin: 0;
+}
+.direct-waiting .button {
+  font-size: 0.78rem;
+}
+.new-hire-page {
+  max-width: 860px;
+  margin: auto;
+  padding: 25px 48px 60px;
+}
+.new-hire-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin: 6px 0 30px;
+}
+.new-hire-intro .portrait {
+  margin-bottom: 20px;
+}
+.new-hire-intro h1 {
+  font-size: 2.2rem;
+  letter-spacing: -0.06em;
+  font-weight: 600;
+  margin: 10px 0;
+}
+.new-hire-intro p {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin: 5px 0;
+}
+.hire-steps {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 0;
+}
+.hire-step {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 15px 0;
+  font-size: 0.92rem;
+}
+.hire-step > svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.hire-step small {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.step-dot {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--control-line);
+  border-radius: 50%;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.hire-state-line {
+  font-size: 0.95rem;
+  margin: 25px 0;
+}
+.hire-actions {
+  flex-wrap: wrap;
+  margin-top: 30px;
+  gap: 12px;
+}
+.hire-actions .button {
+  font-size: 0.85rem;
+}
+@media (max-width: 1100px) {
+  .team-detail {
+    padding: 24px 28px 45px;
+  }
+  .team-detail .employee-hero {
+    gap: 16px;
+  }
+  .team-detail .employee-hero h1 {
+    font-size: 2.1rem;
+  }
+  .team-detail .employee-hero-side {
+    max-width: 170px;
+  }
+  .plan-item {
+    grid-template-columns: 75px minmax(0, 1fr) 100px 75px;
+    gap: 10px;
+  }
+  .routine-actions {
+    gap: 12px;
+  }
+  .direct-page {
+    padding: 24px 26px 18px;
+  }
+  .settings-name-grid {
+    gap: 24px;
+  }
+  .settings-budget {
+    gap: 24px;
+  }
+  .team-section-heading {
+    gap: 15px;
+  }
+  .new-hire-page {
+    padding: 24px 30px 40px;
+  }
+}
+
+.direct-status {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.direct-page .direct-scroll {
+  max-height: calc(100vh - 360px);
+}

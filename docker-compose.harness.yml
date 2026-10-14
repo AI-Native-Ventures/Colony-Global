@@ -1,0 +1,92 @@
+# =============================================================================
+# Isolated test-relay backing stack — GUI read-model overhaul harness (Dawn).
+#
+# A SEPARATE Compose project (`buzz-harness`) so the shared :3000 relay and the
+# default `buzz-*` dev stack are never touched. No fixed container_names (they
+# collide across projects) and alternate host ports. Mirrors Eva's evaperf-*
+# isolation pattern.
+#
+#   Bring up:  docker compose -p buzz-harness -f docker-compose.harness.yml up -d
+#   Ports:     postgres 5471 · redis 6471 · minio 9471/9472
+#   Relay (run separately by scripts/start-isolated-test-relay.sh):
+#              main 3030 · health 8088 · metrics 9202
+# =============================================================================
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: buzz
+      POSTGRES_PASSWORD: buzz_dev
+      POSTGRES_DB: buzz
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "5471:5432"
+    volumes:
+      - harness-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U buzz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6471:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: codemowers/minio:RELEASE.2025-09-07T16-13-09Z@sha256:ab5a28fd48a89e04a837ea4a80085ea342902f8ffdce1a52994ad6f8b3adfc77
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: buzz_dev
+      MINIO_ROOT_PASSWORD: buzz_dev_secret
+    ports:
+      - "9471:9000"
+      - "9472:9001"
+    volumes:
+      - harness-minio-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  minio-init:
+    image: docker.io/amazon/aws-cli:2.37.3@sha256:83f8ffe939569070c5b66d22231862ab78718766d9d8e4c44ca84dd0be5569a5
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: buzz_dev
+      AWS_SECRET_ACCESS_KEY: buzz_dev_secret
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        endpoint=http://minio:9000
+        bucket_query="Buckets[?Name=='buzz-media'].Name | [0]"
+        bucket_exists="$$(aws --endpoint-url "$$endpoint" s3api list-buckets --query "$$bucket_query" --output text)"
+        if [ "$$bucket_exists" = "None" ]; then
+          aws --endpoint-url "$$endpoint" s3api create-bucket --bucket buzz-media
+        fi
+        if policy_output="$$(aws --endpoint-url "$$endpoint" s3api get-bucket-policy --bucket buzz-media --query Policy --output text 2>&1)"; then
+          aws --endpoint-url "$$endpoint" s3api delete-bucket-policy --bucket buzz-media
+        elif [[ "$$policy_output" != *"(NoSuchBucketPolicy)"* ]]; then
+          printf '%s\n' "$$policy_output" >&2
+          exit 1
+        fi
+    restart: "no"
+
+volumes:
+  harness-postgres-data:
+  harness-minio-data:

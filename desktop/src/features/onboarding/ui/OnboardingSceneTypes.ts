@@ -1,0 +1,92 @@
+import type { ScoutGuidance } from "./scoutGuidance";
+import type * as React from "react";
+import type { OnboardingSceneId } from "./onboardingScenes";
+import type { CreditsSnapshot } from "./creditsOnboardingApi";
+
+export type OnboardingSceneData = {
+  hideProgress?: boolean;
+  entryCanOpen?: boolean;
+  scoutGuidance?: ScoutGuidance;
+  firstReply?: string;
+  connectionLabel?: string;
+  name: string;
+  email: string;
+  business: string;
+  website: string;
+  description: string;
+  logoUrl?: string | null;
+  logoSource?: "upload" | "website";
+  websitePending?: boolean;
+  harnessLabel?: string;
+  harnessStatus?: string;
+  connectionReply?: string;
+  connectionPhase?: "starting" | "waiting" | "saving";
+  effectiveModel?: string | null;
+  error?: string | null;
+  pending?: boolean;
+  visualOnly?: boolean;
+  creditsSnapshot?: CreditsSnapshot;
+};
+
+export type OnboardingBusinessChoice = {
+  id: string;
+  name: string;
+  role: string;
+};
+
+export type OnboardingSceneActions = {
+  error?: string | null;
+  onNavigate?: (scene: OnboardingSceneId) => void;
+  onSubmit?: (event: React.FormEvent<HTMLFormElement>) => void;
+  onNameChange?: (value: string) => void;
+  onEmailChange?: (value: string) => void;
+  onPasswordChange?: (value: string) => void;
+  onGoogleSignIn?: () => void;
+  googlePending?: boolean;
+  onBusinessChange?: (value: string) => void;
+  onWebsiteChange?: (value: string) => void;
+  onDescriptionChange?: (value: string) => void;
+  onLogoChange?: (file: File | null) => void;
+  onLogoError?: () => void;
+  onReadWebsite?: () => void;
+  onChooseHarness?: () => void;
+  onCancelTest?: () => void;
+  onResend?: () => void;
+  onCreditsRetry?: () => void;
+  onRuntimeContinue?: () => void;
+  onSelectConnection?: (scene: OnboardingSceneId) => void;
+  pending?: boolean;
+  contentOverride?: React.ReactNode;
+  connectionContentOverride?: React.ReactNode;
+  harnessMark?: React.ReactNode;
+  businessChoices?: OnboardingBusinessChoice[];
+  onSelectBusiness?: (id: string) => void;
+  onCreateBusiness?: () => void;
+  canSubmit?: boolean;
+  /** Business mark and name of a pending workspace invite (account and sign-in). */
+  inviteBrand?: React.ReactNode;
+  /** "Have an invite link?" on the account screen; absent once an invite is pending. */
+  onHaveInviteLink?: () => void;
+  headingRef?: React.RefObject<HTMLHeadingElement | null>;
+  authCode?: {
+    value: string;
+    attemptsLeft?: number;
+    cooldownSecs?: number;
+    newPassword?: string;
+    confirmPassword?: string;
+    pending?: boolean;
+    error?: string | null;
+    onCodeChange?: (value: string) => void;
+    onCodeSubmit?: (event: React.FormEvent<HTMLFormElement>) => void;
+    onNewPasswordChange?: (value: string) => void;
+    onConfirmPasswordChange?: (value: string) => void;
+    onPasswordSubmit?: (event: React.FormEvent<HTMLFormElement>) => void;
+    onChangeEmail?: () => void;
+    onResend?: () => void;
+  };
+};
+
+export type PresentationProps = {
+  scene: OnboardingSceneId;
+  data: OnboardingSceneData;
+} & OnboardingSceneActions;

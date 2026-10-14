@@ -1,0 +1,94 @@
+/// NIP-42 authentication handler.
+pub mod admin_action_worker;
+pub mod admin_outbox_worker;
+pub mod auth;
+/// Nostr-first broker for business-record contracts.
+pub mod business_records;
+/// Pure NIP-29 channel membership-authority decisions (kinds 9000/9001/9022).
+pub mod channel_authz;
+/// Subscription close (CLOSE) handler.
+pub mod close;
+/// Command executor — transactional processing for command kinds.
+pub mod command_executor;
+/// Relay-operator community provisioning HTTP support.
+pub mod community_provisioning;
+/// Nostr-first broker for channel-scoped company asks.
+pub mod company_asks;
+pub mod company_duties;
+/// Nostr-first broker for community-wide employee configuration history.
+pub mod company_employee_history;
+/// Nostr-first broker for Software Factory run metadata.
+pub mod company_factory;
+pub mod company_hires;
+pub mod company_lessons;
+/// Nostr-first broker for community-wide company member positions.
+pub mod company_member_records;
+/// Nostr-first broker for community-wide standing tool permissions.
+pub mod company_permissions;
+/// Nostr-first broker for company records (goals and asks).
+pub mod company_records;
+/// Nostr-first broker for device-backed secret binding records.
+pub mod company_secrets;
+/// Brokers for company-wide singleton records: business profile and team computer.
+pub mod company_singleton_records;
+pub mod company_spend;
+/// Nostr-first broker for company work suggestions and watchdog settings.
+pub mod company_work_tracking;
+/// Durable company work watchdog check-in scheduler and delivery worker.
+pub mod company_work_watchdog_worker;
+/// NIP-45 COUNT handler.
+pub mod count;
+/// EVENT handler — WS dispatcher → ingest pipeline → fan-out.
+pub mod event;
+/// NIP-IA identity archive request handler (kinds 9035–9036).
+pub mod identity_archive;
+/// imeta tag validation helpers.
+pub mod imeta;
+/// Transport-neutral event ingestion pipeline.
+pub mod ingest;
+/// Community moderation authorization seam (capability helper).
+pub mod moderation_authz;
+/// Community moderation command handler (kinds 9040–9044).
+pub mod moderation_commands;
+/// Relay-signed moderation notice DMs.
+pub mod moderation_notices;
+/// Product-feedback validation + deployment sidecar persistence.
+pub mod product_feedback;
+#[allow(dead_code, missing_docs)]
+pub mod push_lease;
+/// NIP-43 relay membership admin command handler (kinds 9030–9032).
+pub mod relay_admin;
+/// NIP-56 report (kind:1984) validation + moderation queue persistence.
+pub mod report;
+/// HTTP report-resolution orchestrations for the deployment admin API (Phase 2).
+pub mod report_resolution;
+/// REQ handler — subscribe, deliver historical events, then EOSE.
+pub mod req;
+/// NIP-29 and NIP-25 side-effect handlers.
+pub mod side_effects;
+
+/// Extract an optional TTL (in seconds) from a Nostr event's `ttl` tag,
+/// applying the server-side override when configured.
+///
+/// Returns `None` when the event carries no `ttl` tag — the channel is permanent.
+pub fn resolve_ttl(event: &nostr::Event, ephemeral_ttl_override: Option<i32>) -> Option<i32> {
+    let from_tag: Option<i32> = event.tags.iter().find_map(|t| {
+        if t.kind().to_string() == "ttl" {
+            t.content().and_then(|s| s.parse::<i32>().ok())
+        } else {
+            None
+        }
+    });
+
+    match (from_tag, ephemeral_ttl_override) {
+        (Some(original), Some(ovr)) => {
+            tracing::debug!(
+                original,
+                override_val = ovr,
+                "Applying BUZZ_EPHEMERAL_TTL_OVERRIDE"
+            );
+            Some(ovr)
+        }
+        (ttl, _) => ttl,
+    }
+}

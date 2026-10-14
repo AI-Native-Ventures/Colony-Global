@@ -1,0 +1,278 @@
+part of '../thread_detail_page.dart';
+
+class _ThreadMessageList extends StatelessWidget {
+  final LaidOutViewport viewport;
+  final VoidCallback onUserScrollStart;
+  final VoidCallback onUserScrollEnd;
+  final bool visible;
+  final ItemScrollController itemScrollController;
+  final ItemPositionsListener itemPositionsListener;
+  final double bottomInset;
+  final List<TimelineMessage> replies;
+  final int replyCount;
+  final DateTime dayHeadingNow;
+  final AsyncValue<List<NostrEvent>> relayReplyState;
+  final Map<String, DateTime> localSendAnimations;
+  final Widget Function(Widget child) trackActiveScrollPosition;
+  final bool headIsDeleted;
+  final TimelineMessage head;
+  final ValueNotifier<int?> stickyDayTimestamp;
+  final Map<String, String> channelNames;
+  final String channelId;
+  final String? currentPubkey;
+  final String? highlightedMessageId;
+  final List<TimelineMessage> allMessages;
+  final bool isMember;
+  final bool isArchived;
+  final FocusNode composerFocusNode;
+  final VoidCallback restoreComposerFocus;
+  final Map<String, List<TimelineMessage>> childrenByParent;
+
+  const _ThreadMessageList({
+    required this.viewport,
+    required this.onUserScrollStart,
+    required this.onUserScrollEnd,
+    required this.visible,
+    required this.itemScrollController,
+    required this.itemPositionsListener,
+    required this.bottomInset,
+    required this.replies,
+    required this.replyCount,
+    required this.dayHeadingNow,
+    required this.relayReplyState,
+    required this.localSendAnimations,
+    required this.trackActiveScrollPosition,
+    required this.headIsDeleted,
+    required this.head,
+    required this.stickyDayTimestamp,
+    required this.channelNames,
+    required this.channelId,
+    required this.currentPubkey,
+    required this.highlightedMessageId,
+    required this.allMessages,
+    required this.isMember,
+    required this.isArchived,
+    required this.composerFocusNode,
+    required this.restoreComposerFocus,
+    required this.childrenByParent,
+  });
+
+  String get _replySummary {
+    if (!relayReplyState.hasValue && replies.isEmpty) {
+      return relayReplyState.isLoading
+          ? 'Loading replies…'
+          : 'Couldn’t load replies';
+    }
+    final count = '$replyCount ${replyCount == 1 ? 'reply' : 'replies'}';
+    if (!relayReplyState.hasError) return '$count · Following';
+    return '$count · Following · ${relayReplyState.isLoading ? 'Retrying…' : 'Couldn’t refresh'}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const headIndex = 0;
+    final tailAnchorIndex = replies.length + 1;
+
+    return LaidOutViewportReporter(
+      viewport: viewport,
+      child: KeyboardDismissOnDrag(
+        onUserScrollStart: onUserScrollStart,
+        onUserScrollEnd: onUserScrollEnd,
+        child: Opacity(
+          key: const ValueKey('thread-initial-viewport-gate'),
+          opacity: visible ? 1 : 0,
+          child: IgnorePointer(
+            ignoring: !visible,
+            child: ScrollablePositionedList.builder(
+              key: const ValueKey('thread-message-list'),
+              itemScrollController: itemScrollController,
+              itemPositionsListener: itemPositionsListener,
+              // Top-anchored, head first, replies flowing down — matching
+              // desktop's thread panel. The old reversed list bottom-anchored
+              // the content, which jammed the head against the composer
+              // whenever a thread had only a handful of replies.
+              padding: EdgeInsets.only(
+                left: Grid.xs,
+                right: Grid.xs,
+                top: Grid.xxs,
+                bottom: Grid.xs + bottomInset,
+              ),
+              // Head + replies + a stable zero-content tail target. The
+              // anchor lets Latest align the end directly rather than
+              // asking the final reply's leading edge to overshoot the
+              // viewport and rebound against the scroll extent.
+              itemCount: replies.length + 2,
+              itemBuilder: (context, index) {
+                if (index == tailAnchorIndex) {
+                  return trackActiveScrollPosition(
+                    const SizedBox(
+                      key: ValueKey('thread-tail-anchor'),
+                      height: 1,
+                    ),
+                  );
+                }
+                if (index == headIndex) {
+                  if (headIsDeleted) {
+                    return trackActiveScrollPosition(
+                      const Padding(
+                        key: ValueKey('thread-message-deleted'),
+                        padding: EdgeInsets.only(bottom: Grid.xs),
+                        child: Text('This message was deleted'),
+                      ),
+                    );
+                  }
+                  return trackActiveScrollPosition(
+                    Padding(
+                      key: ValueKey('thread-message-group-${head.id}'),
+                      padding: EdgeInsets.zero,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          DayDivider(
+                            key: ValueKey('thread-head-day-divider-${head.id}'),
+                            label: formatConversationDayHeading(
+                              head.createdAt,
+                              now: dayHeadingNow,
+                            ),
+                            dayTimestamp: head.createdAt,
+                          ),
+                          _ThreadMessage(
+                            message: head,
+                            channelNames: channelNames,
+                            channelId: channelId,
+                            currentPubkey: currentPubkey,
+                            showAuthor: true,
+                            isHighlighted: head.id == highlightedMessageId,
+                            allMessages: allMessages,
+                            isMember: isMember,
+                            isArchived: isArchived,
+                            isThreadHead: true,
+                            composerFocusNode: composerFocusNode,
+                            restoreComposerFocus: restoreComposerFocus,
+                          ),
+                          Container(
+                            key: const ValueKey('thread-replies-following'),
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(top: 18),
+                            padding: const EdgeInsets.fromLTRB(
+                              Grid.gutter,
+                              8,
+                              Grid.gutter,
+                              6,
+                            ),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: context.mobileTokens.line,
+                                ),
+                              ),
+                            ),
+                            child: Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                _replySummary,
+                                style: conversationDateTextStyle.copyWith(
+                                  color: context.mobileTokens.muted,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                // Chronological list: index 1 = oldest reply.
+                final chronologicalIndex = index - 1;
+                final reply = replies[chronologicalIndex];
+                final previousReply = chronologicalIndex > 0
+                    ? replies[chronologicalIndex - 1]
+                    : null;
+                final previousMessage = previousReply ?? head;
+                final showDayDivider = !isSameDay(
+                  previousMessage.createdAt,
+                  reply.createdAt,
+                );
+                final showAuthor =
+                    previousReply == null ||
+                    showDayDivider ||
+                    previousReply.pubkey.toLowerCase() !=
+                        reply.pubkey.toLowerCase() ||
+                    (reply.createdAt - previousReply.createdAt) > 300;
+
+                // Check if this reply itself has children (nested thread).
+                final nestedChildren = childrenByParent[reply.id];
+                final nestedSummary =
+                    nestedChildren != null && nestedChildren.isNotEmpty
+                    ? _buildNestedSummary(reply.id, nestedChildren)
+                    : null;
+
+                return trackActiveScrollPosition(
+                  LocalMessageSendTransition(
+                    key: ValueKey('thread-message-send-${reply.id}'),
+                    animate: isRecentLocalMessageSendAnimation(
+                      localSendAnimations,
+                      reply.id,
+                    ),
+                    startOffsetFactor: showAuthor
+                        ? localMessageSendTransitionAvatarStartOffset
+                        : localMessageSendTransitionStartOffset,
+                    child: Padding(
+                      key: ValueKey('thread-message-group-${reply.id}'),
+                      // Tail spacing comes from the list's own bottom padding now
+                      // that the list runs top-down; the reversed list used to
+                      // need it here because item 0 sat against the composer.
+                      padding: EdgeInsets.zero,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (showDayDivider)
+                            DayDivider(
+                              label: formatConversationDayHeading(
+                                reply.createdAt,
+                                now: dayHeadingNow,
+                              ),
+                              dayTimestamp: reply.createdAt,
+                              stickyDayTimestamp: stickyDayTimestamp,
+                            ),
+                          _ThreadMessage(
+                            message: reply,
+                            channelNames: channelNames,
+                            channelId: channelId,
+                            currentPubkey: currentPubkey,
+                            showAuthor: showAuthor,
+                            followsDayDivider: showDayDivider,
+                            authorSpacing: previousReply == null
+                                ? Grid.eighteen
+                                : 22,
+                            isHighlighted: reply.id == highlightedMessageId,
+                            allMessages: allMessages,
+                            isMember: isMember,
+                            isArchived: isArchived,
+                            composerFocusNode: composerFocusNode,
+                            restoreComposerFocus: restoreComposerFocus,
+                          ),
+                          if (nestedSummary != null)
+                            _NestedThreadSummaryRow(
+                              summary: nestedSummary,
+                              replyMessage: reply,
+                              allMessages: allMessages,
+                              channelId: channelId,
+                              currentPubkey: currentPubkey,
+                              isMember: isMember,
+                              isArchived: isArchived,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
