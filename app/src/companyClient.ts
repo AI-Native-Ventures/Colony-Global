@@ -12,7 +12,7 @@ export type Company = {
   slug: string;
   host: string;
   ownerPubkey: string;
-  role: "owner" | "admin" | "member";
+  role: "owner" | "admin" | "partner" | "member";
 };
 
 export type ProvisioningConfig = {
@@ -164,7 +164,12 @@ function companyFrom(value: unknown, domain: string, pubkey: string): Company {
     throw new CompanyError("invalid_response");
   }
   const role = raw.role ?? (raw.owner_pubkey === pubkey ? "owner" : "member");
-  if (role !== "owner" && role !== "admin" && role !== "member") {
+  if (
+    role !== "owner" &&
+    role !== "admin" &&
+    role !== "partner" &&
+    role !== "member"
+  ) {
     throw new CompanyError("invalid_response");
   }
   return {

@@ -94,12 +94,11 @@ function selectedForStep(draft: Draft, step: number): string[] {
   return [];
 }
 
-function readDraft(key: string): Draft {
-  const fallback = defaultDraft();
+function readDraft(key: string): Draft | null {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(key) || "null");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return fallback;
+      return null;
     const value = parsed as Partial<Draft>;
     if (
       typeof value.step !== "number" ||
@@ -124,10 +123,10 @@ function readDraft(key: string): Draft {
       !Array.isArray(value.goals) ||
       !value.goals.every((item) => typeof item === "string")
     )
-      return fallback;
+      return null;
     return value as Draft;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -233,8 +232,19 @@ export function CompanyEntry({
   initialCompany: Company | null;
   onComplete: (company: Company, profile: BusinessProfile) => void;
 }) {
-  const storageKey = `colony-global-business-draft:${accountPubkey}`;
-  const [draft, setDraft] = useState(() => readDraft(storageKey));
+  const draftPrefix = `colony-global-business-draft:${accountPubkey}:${config.domain}`;
+  const newCompanyKey = `${draftPrefix}:new`;
+  const storageKey = initialCompany
+    ? `${draftPrefix}:${initialCompany.id}`
+    : newCompanyKey;
+  const [draft, setDraft] = useState(() => {
+    const scoped = readDraft(storageKey);
+    if (scoped) return scoped;
+    const starting = initialCompany ? readDraft(newCompanyKey) : null;
+    return starting && initialCompany && starting.slug === initialCompany.slug
+      ? starting
+      : defaultDraft();
+  });
   const [company, setCompany] = useState<Company | null>(initialCompany);
   const [input, setInput] = useState(() => inputForStep(draft, draft.step));
   const [selected, setSelected] = useState<string[]>(() =>
@@ -403,6 +413,8 @@ export function CompanyEntry({
       );
       try {
         localStorage.removeItem(storageKey);
+        if (storageKey !== newCompanyKey)
+          localStorage.removeItem(newCompanyKey);
       } catch {
         /* Server copy is authoritative. */
       }

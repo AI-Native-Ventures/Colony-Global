@@ -867,6 +867,23 @@ test("multiple memberships require a choice and members cannot create a missing 
   await member.close();
 });
 
+test("a partner reopens the shared company profile", async () => {
+  const page = await tracedPage("company-partner-entry");
+  await installMock(page, {
+    initialAccount: true,
+    companies: [
+      { ...defaultCompany, owner_pubkey: "b".repeat(64), role: "partner" },
+    ],
+  });
+  await page.goto(url);
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  assert.match(
+    await page.locator(".titlebar-company").innerText(),
+    /Lerato Designs/u,
+  );
+  await page.close();
+});
+
 test("a tampered business profile cannot open the company", async () => {
   const forged = {
     ...profileEvent(defaultProfile),
