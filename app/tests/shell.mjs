@@ -83,6 +83,7 @@ async function installMock(page, options = {}) {
         companyFailures: [...settings.companyFailures],
         profileSaveFailures: [...settings.profileSaveFailures],
         createFailures: [...settings.createFailures],
+        profileQueryFailures: [...settings.profileQueryFailures],
       };
       const persistCompany = () =>
         sessionStorage.setItem(
@@ -230,6 +231,13 @@ async function installMock(page, options = {}) {
           return json({ self: settings.relaySelf });
         }
         if (path === "/query") {
+          const index = state.profileQueryFailures.findIndex((failure) =>
+            target.includes(failure.host),
+          );
+          if (index >= 0) {
+            const [failure] = state.profileQueryFailures.splice(index, 1);
+            return json({ error: failure.code }, failure.status);
+          }
           return json(state.profileEvent ? [state.profileEvent] : []);
         }
         if (path === "/events") {
@@ -280,6 +288,7 @@ async function installMock(page, options = {}) {
       companyFailures: options.companyFailures ?? [],
       profileSaveFailures: options.profileSaveFailures ?? [],
       createFailures: options.createFailures ?? [],
+      profileQueryFailures: options.profileQueryFailures ?? [],
     },
   );
 }
@@ -881,6 +890,38 @@ test("a partner reopens the shared company profile", async () => {
     await page.locator(".titlebar-company").innerText(),
     /Lerato Designs/u,
   );
+  await page.close();
+});
+
+test("one unavailable company does not block another company", async () => {
+  const second = {
+    ...defaultCompany,
+    id: "44444444-4444-4444-8444-444444444444",
+    slug: "another-shop",
+    normalized_host: "another-shop.colony.example.test",
+  };
+  const page = await tracedPage("company-partial-outage");
+  await installMock(page, {
+    initialAccount: true,
+    companies: [defaultCompany, second],
+    profileQueryFailures: [
+      { host: "another-shop", status: 503, code: "unavailable" },
+    ],
+  });
+  await page.goto(url);
+  await page.getByRole("heading", { name: "Choose a company" }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Company temporarily unavailable" })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(
+    await page.getByRole("button", { name: "Try loading again" }).count(),
+    1,
+  );
+  await page.getByRole("button", { name: "Lerato Designs" }).click();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
   await page.close();
 });
 

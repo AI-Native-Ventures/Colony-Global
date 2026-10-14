@@ -713,9 +713,11 @@ export function CompanyEntry({
 export function CompanyPicker({
   companies,
   onSelect,
+  onRetry,
 }: {
-  companies: { company: Company; name: string }[];
+  companies: { company: Company; name: string; available: boolean }[];
   onSelect: (company: Company) => void;
+  onRetry: () => void;
 }) {
   return (
     <main className="startup-state" id="main-content">
@@ -723,16 +725,22 @@ export function CompanyPicker({
         <h1>Choose a company</h1>
         <p>Which company do you want to open?</p>
         <div>
-          {companies.map(({ company, name }) => (
+          {companies.map(({ company, name, available }) => (
             <button
               key={company.id}
               type="button"
               className="business-option"
+              disabled={!available}
               onClick={() => onSelect(company)}
             >
               {name}
             </button>
           ))}
+          {companies.some((item) => !item.available) && (
+            <button type="button" className="first-run-link" onClick={onRetry}>
+              Try loading again
+            </button>
+          )}
         </div>
       </div>
     </main>

@@ -42,7 +42,7 @@ type CompanyState =
   | {
       kind: "choose";
       context: CompanyContext;
-      companies: { company: Company; name: string }[];
+      companies: { company: Company; name: string; available: boolean }[];
     }
   | { kind: "setup"; context: CompanyContext; company: Company }
   | { kind: "ready"; company: Company; profile: BusinessProfile };
@@ -151,12 +151,23 @@ export default function App() {
           await openCompany(companies[0], context, request);
         else {
           const named = await Promise.all(
-            companies.map(async (company) => ({
-              company,
-              name:
-                (await client.profile(company, config))?.name ??
-                "Company being set up",
-            })),
+            companies.map(async (company) => {
+              try {
+                return {
+                  company,
+                  name:
+                    (await client.profile(company, config))?.name ??
+                    "Company being set up",
+                  available: true,
+                };
+              } catch {
+                return {
+                  company,
+                  name: "Company temporarily unavailable",
+                  available: false,
+                };
+              }
+            }),
           );
           if (companyGeneration.current === request)
             setCompanyState({ kind: "choose", context, companies: named });
@@ -248,6 +259,7 @@ export default function App() {
     return (
       <CompanyPicker
         companies={companyState.companies}
+        onRetry={refreshCompanies}
         onSelect={(company) => {
           const request = ++companyGeneration.current;
           setCompanyState({ kind: "checking" });

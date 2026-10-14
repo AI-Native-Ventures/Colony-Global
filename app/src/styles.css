@@ -575,6 +575,14 @@ p {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
+.business-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+.business-option:disabled:hover {
+  border-color: var(--line);
+  background: var(--surface);
+}
 .business-options .business-option {
   font-size: 0.86rem;
   border-radius: 999px;
