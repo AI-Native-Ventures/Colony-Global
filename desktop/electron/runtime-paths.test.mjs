@@ -33,7 +33,7 @@ test("development paths honor the host and Vite URL overrides", () => {
 
   assert.deepEqual(paths, {
     nativeHost: "/tmp/colony-native-host-dev",
-    rendererRoot: "/checkout/desktop/dist",
+    rendererRoot: "/checkout/app/dist",
     preload: "/checkout/desktop/electron/preload.cjs",
     devUrl: "http://127.0.0.1:5173",
   });
@@ -52,6 +52,7 @@ test("development defaults to the debug host under desktop/src-tauri", () => {
     "/checkout/desktop/src-tauri/target/debug/colony-native-host",
   );
   assert.equal(paths.devUrl, undefined);
+  assert.equal(paths.rendererRoot, "/checkout/app/dist");
 });
 
 test("Windows host paths include the executable suffix", () => {

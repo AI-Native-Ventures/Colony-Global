@@ -24,7 +24,9 @@ export function runtimePaths({
 
   return {
     nativeHost,
-    rendererRoot: pathApi.join(appPath, "dist"),
+    rendererRoot: packaged
+      ? pathApi.join(appPath, "dist")
+      : pathApi.join(pathApi.dirname(appPath), "app", "dist"),
     preload: pathApi.join(appPath, "electron", "preload.cjs"),
     devUrl: packaged ? undefined : env.COLONY_ELECTRON_DEV_URL,
   };

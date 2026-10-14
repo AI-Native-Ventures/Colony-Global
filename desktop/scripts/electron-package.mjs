@@ -29,6 +29,7 @@ import {
 } from "./electron-package-config.mjs";
 import { build } from "esbuild";
 import { deepLinkSchemesFromConfig } from "../electron/deep-links.mjs";
+import { colonyRendererSource } from "./electron-renderer-source.mjs";
 
 const exec = promisify(execFile);
 const desktop = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -45,7 +46,7 @@ const sidecarSourceDir = path.resolve(sidecarDir ?? path.dirname(hostPath));
 const sidecarPaths = sidecarFilenames(platform).map((filename) =>
   path.join(sidecarSourceDir, filename),
 );
-const distPath = path.join(desktop, "dist");
+const distPath = colonyRendererSource(repo);
 const sourceElectronPath = path.join(desktop, "electron");
 const packageJsonPath = path.join(desktop, "package.json");
 const tauriConfigPath = path.join(desktop, "src-tauri", "tauri.conf.json");
