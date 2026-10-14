@@ -185,6 +185,18 @@ function validName(name: string) {
   );
 }
 
+function validPersonName(name: string) {
+  const trimmed = name.trim();
+  return (
+    trimmed.length > 0 &&
+    trimmed.length <= 80 &&
+    ![...trimmed].some((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      return code < 32 || code === 127;
+    })
+  );
+}
+
 function normalizeLinks(input: string): string[] {
   return input
     .split(/[\s,]+/)
@@ -336,7 +348,7 @@ export function CompanyEntry({
     const step = draft.step;
     const next = { ...draft };
     if (step === 0) {
-      if (!input.trim() || input.trim().length > 80) {
+      if (!validPersonName(input)) {
         setError("Tell me your name to carry on.");
         return;
       }
@@ -406,6 +418,7 @@ export function CompanyEntry({
     setError(null);
     try {
       const target = await ensureCompany(draft);
+      await client.ensurePersonName(target, config, draft.ownerName);
       const saved = await client.saveProfile(
         target,
         config,

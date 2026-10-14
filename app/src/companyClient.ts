@@ -6,6 +6,7 @@ const MAX_RESPONSE_BYTES = 64 * 1024;
 const PROFILE_D = "business-profile";
 const PROFILE_HEAD_KIND = 30657;
 const PROFILE_ACTION_KIND = 47046;
+const PERSON_PROFILE_KIND = 0;
 
 export type Company = {
   id: string;
@@ -243,6 +244,44 @@ function profileFrom(
   return { profile: profile as BusinessProfile, revision };
 }
 
+function personProfileFrom(value: unknown, pubkey: string) {
+  const event = object(value);
+  if (
+    !event ||
+    event.kind !== PERSON_PROFILE_KIND ||
+    event.pubkey !== pubkey ||
+    !verifyEvent(event as Parameters<typeof verifyEvent>[0]) ||
+    typeof event.content !== "string" ||
+    !Number.isSafeInteger(event.created_at) ||
+    (Array.isArray(event.tags) &&
+      event.tags.some((tag) => Array.isArray(tag) && tag[0] === "h"))
+  )
+    throw new CompanyError("invalid_response");
+  let content: Record<string, unknown> | null;
+  try {
+    content = object(JSON.parse(event.content));
+  } catch {
+    throw new CompanyError("invalid_response");
+  }
+  if (
+    !content ||
+    ["display_name", "name"].some(
+      (key) =>
+        content?.[key] !== undefined &&
+        (typeof content[key] !== "string" || content[key].length > 120),
+    )
+  )
+    throw new CompanyError("invalid_response");
+  return {
+    content,
+    event,
+    name:
+      (content.display_name as string | undefined)?.trim() ||
+      (content.name as string | undefined)?.trim() ||
+      null,
+  };
+}
+
 function profileMatches(
   current: BusinessProfile,
   expected: BusinessProfile,
@@ -376,6 +415,31 @@ export function createCompanyClient(
     return heads.sort((a, b) => b.revision - a.revision)[0] ?? null;
   }
 
+  async function personProfileHead(
+    company: Company,
+    config: ProvisioningConfig,
+  ) {
+    const events = await request(
+      companyBase(company, config),
+      "/query",
+      "POST",
+      JSON.stringify([
+        { kinds: [PERSON_PROFILE_KIND], authors: [accountPubkey], limit: 10 },
+      ]),
+      true,
+    );
+    if (!Array.isArray(events) || events.length >= 10)
+      throw new CompanyError("invalid_response");
+    return (
+      events
+        .map((event) => personProfileFrom(event, accountPubkey))
+        .sort(
+          (a, b) =>
+            (b.event.created_at as number) - (a.event.created_at as number),
+        )[0] ?? null
+    );
+  }
+
   return {
     async config(): Promise<ProvisioningConfig> {
       const raw = object(
@@ -436,6 +500,54 @@ export function createCompanyClient(
       config: ProvisioningConfig,
     ): Promise<BusinessProfile | null> {
       return (await profileHead(company, config))?.profile ?? null;
+    },
+    async ensurePersonName(
+      company: Company,
+      config: ProvisioningConfig,
+      requestedName: string,
+    ): Promise<string> {
+      const name = requestedName.trim();
+      if (
+        !name ||
+        name.length > 80 ||
+        [...name].some((char) => {
+          const code = char.codePointAt(0) ?? 0;
+          return code < 32 || code === 127;
+        })
+      )
+        throw new CompanyError("invalid_response");
+      const before = await personProfileHead(company, config);
+      if (before?.name) return before.name;
+      const event = await signEvent({
+        kind: PERSON_PROFILE_KIND,
+        content: JSON.stringify({ ...before?.content, display_name: name }),
+        tags: (before?.event.tags as string[][] | undefined) ?? [],
+      });
+      if (event.pubkey !== accountPubkey) throw new CompanyError("not_allowed");
+      if (!verifyEvent(event as Parameters<typeof verifyEvent>[0]))
+        throw new CompanyError("invalid_response");
+      try {
+        const result = object(
+          await request(
+            companyBase(company, config),
+            "/events",
+            "POST",
+            JSON.stringify(event),
+            true,
+          ),
+        );
+        if (result?.accepted !== true || result.event_id !== event.id)
+          throw new CompanyError("save_failed");
+      } catch (error) {
+        const recovered = await personProfileHead(company, config).catch(
+          () => null,
+        );
+        if (recovered?.name === name) return name;
+        throw error;
+      }
+      const saved = await personProfileHead(company, config);
+      if (saved?.name !== name) throw new CompanyError("save_failed");
+      return name;
     },
     async saveProfile(
       company: Company,

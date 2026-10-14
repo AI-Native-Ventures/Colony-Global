@@ -347,6 +347,79 @@ async fn company_entry_creates_and_reads_shared_profile() {
     let info = response_json(info).await;
     assert_eq!(info["self"], state.relay_keypair.public_key().to_hex());
 
+    let person = EventBuilder::new(
+        Kind::Metadata,
+        serde_json::json!({ "display_name": "Lerato" }).to_string(),
+    )
+    .sign_with_keys(&owner)
+    .expect("sign company-scoped person profile");
+    let person_write = signed_request(
+        state.clone(),
+        &owner,
+        &company_host,
+        "POST",
+        "/events",
+        Some(serde_json::to_string(&person).expect("serialize person profile")),
+        None,
+    )
+    .await;
+    assert_eq!(person_write.status(), StatusCode::OK);
+    assert_eq!(response_json(person_write).await["accepted"], true);
+    let person_read = signed_request(
+        state.clone(),
+        &owner,
+        &company_host,
+        "POST",
+        "/query",
+        Some(
+            serde_json::json!([{ "kinds": [0], "authors": [owner.public_key().to_hex()], "limit": 10 }])
+                .to_string(),
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(person_read.status(), StatusCode::OK);
+    let person_heads = response_json(person_read).await;
+    let person_heads = person_heads.as_array().expect("person profile array");
+    assert_eq!(person_heads.len(), 1);
+    let person_head: nostr::Event =
+        serde_json::from_value(person_heads[0].clone()).expect("signed person profile");
+    assert!(person_head.verify().is_ok());
+    assert_eq!(person_head.pubkey, owner.public_key());
+    let person_content: Value =
+        serde_json::from_str(&person_head.content).expect("person profile content");
+    assert_eq!(person_content["display_name"], "Lerato");
+
+    let other_slug = format!("other-{}", Uuid::new_v4().simple());
+    let other_created = create_request(
+        state.clone(),
+        &owner,
+        &ingress_host,
+        &other_slug,
+        Some("198.51.100.40"),
+    )
+    .await;
+    assert_eq!(other_created.status(), StatusCode::OK);
+    let other_host = format!("{other_slug}.{domain}");
+    let other_person_read = signed_request(
+        state.clone(),
+        &owner,
+        &other_host,
+        "POST",
+        "/query",
+        Some(
+            serde_json::json!([{ "kinds": [0], "authors": [owner.public_key().to_hex()], "limit": 10 }])
+                .to_string(),
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(other_person_read.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(other_person_read).await,
+        serde_json::json!([])
+    );
+
     let profile = serde_json::json!({
         "schemaVersion": 1,
         "name": "Lerato Designs",

@@ -12,11 +12,13 @@ let browser;
 const tracedContexts = [];
 const relaySecret = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 const relaySelf = getPublicKey(relaySecret);
+const accountSecret = Uint8Array.from({ length: 32 }, (_, index) => index + 33);
+const accountPubkey = getPublicKey(accountSecret);
 const defaultCompany = {
   id: "11111111-1111-4111-8111-111111111111",
   slug: "lerato-designs",
   normalized_host: "lerato-designs.colony.example.test",
-  owner_pubkey: "a".repeat(64),
+  owner_pubkey: accountPubkey,
   role: "owner",
 };
 
@@ -32,6 +34,18 @@ function profileEvent(profile, revision = 1) {
       content: JSON.stringify(profile),
     },
     relaySecret,
+  );
+}
+
+function personEvent(name, other = {}) {
+  return finalizeEvent(
+    {
+      kind: 0,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [],
+      content: JSON.stringify({ ...other, display_name: name }),
+    },
+    accountSecret,
   );
 }
 
@@ -53,9 +67,20 @@ async function installMock(page, options = {}) {
   await page.exposeFunction("__COLONY_SIGN_PROFILE__", (profile) =>
     profileEvent(profile),
   );
+  await page.exposeFunction("__COLONY_SIGN_EVENT__", (event) =>
+    finalizeEvent(
+      {
+        kind: event.kind,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: event.tags,
+        content: event.content,
+      },
+      accountSecret,
+    ),
+  );
   await page.addInitScript(
     (settings) => {
-      const key = "a".repeat(64);
+      const key = settings.accountPubkey;
       const account = {
         id: "account-1",
         email: "lerato@example.com",
@@ -80,10 +105,13 @@ async function installMock(page, options = {}) {
         imported: false,
         companies: persisted?.companies ?? structuredClone(settings.companies),
         profileEvent: persisted?.profileEvent ?? settings.profileEvent,
+        personEvent: persisted?.personEvent ?? settings.personEvent,
         companyFailures: [...settings.companyFailures],
         profileSaveFailures: [...settings.profileSaveFailures],
+        personSaveFailures: [...settings.personSaveFailures],
         createFailures: [...settings.createFailures],
         profileQueryFailures: [...settings.profileQueryFailures],
+        personQueryFailures: [...settings.personQueryFailures],
       };
       const persistCompany = () =>
         sessionStorage.setItem(
@@ -92,6 +120,7 @@ async function installMock(page, options = {}) {
             account: state.account,
             companies: state.companies,
             profileEvent: state.profileEvent,
+            personEvent: state.personEvent,
           }),
         );
       window.__COLONY_TEST__ = state;
@@ -115,15 +144,9 @@ async function installMock(page, options = {}) {
                 reset_failed: false,
               };
             case "sign_event":
-              return JSON.stringify({
-                id: "event-1",
-                pubkey: key,
-                kind: payload.args.kind,
-                tags: payload.args.tags,
-                content: payload.args.content,
-                created_at: 1,
-                sig: "signed-in-native-host",
-              });
+              return JSON.stringify(
+                await window.__COLONY_SIGN_EVENT__(payload.args),
+              );
             case "fetch_join_policy":
               if (state.policyFailures-- > 0) throw new Error("Policy offline");
               return state.policy;
@@ -231,6 +254,11 @@ async function installMock(page, options = {}) {
           return json({ self: settings.relaySelf });
         }
         if (path === "/query") {
+          if (body?.[0]?.kinds?.includes(0)) {
+            const next = state.personQueryFailures.shift();
+            if (next) return json({ error: next.code }, next.status);
+            return json(state.personEvent ? [state.personEvent] : []);
+          }
           const index = state.profileQueryFailures.findIndex((failure) =>
             target.includes(failure.host),
           );
@@ -241,6 +269,15 @@ async function installMock(page, options = {}) {
           return json(state.profileEvent ? [state.profileEvent] : []);
         }
         if (path === "/events") {
+          if (body.kind === 0) {
+            const next = state.personSaveFailures.shift();
+            if (next && !next.afterCommit)
+              return json({ error: next.code }, next.status);
+            state.personEvent = body;
+            persistCompany();
+            if (next) return json({ error: next.code }, next.status);
+            return json({ event_id: body.id, accepted: true, message: "" });
+          }
           const next = state.profileSaveFailures.shift();
           if (next) return json({ error: next.code }, next.status);
           const action = JSON.parse(body.content);
@@ -264,6 +301,7 @@ async function installMock(page, options = {}) {
     },
     {
       initialAccount: options.initialAccount ?? false,
+      accountPubkey,
       policy: options.policy ?? null,
       hostFailures: options.hostFailures ?? 0,
       policyFailures: options.policyFailures ?? 0,
@@ -272,7 +310,7 @@ async function installMock(page, options = {}) {
       networkFailure: options.networkFailure ?? false,
       existingEmail: options.existingEmail ?? false,
       httpUrl: options.httpUrl ?? "http://127.0.0.1:3000",
-      importPubkey: options.importPubkey ?? "a".repeat(64),
+      importPubkey: options.importPubkey ?? accountPubkey,
       companies:
         options.companies ??
         (options.initialAccount || options.existingEmail
@@ -284,11 +322,14 @@ async function installMock(page, options = {}) {
             ? profileEvent(defaultProfile)
             : null
           : options.profileEvent,
+      personEvent: options.personEvent ?? null,
       relaySelf,
       companyFailures: options.companyFailures ?? [],
       profileSaveFailures: options.profileSaveFailures ?? [],
+      personSaveFailures: options.personSaveFailures ?? [],
       createFailures: options.createFailures ?? [],
       profileQueryFailures: options.profileQueryFailures ?? [],
+      personQueryFailures: options.personQueryFailures ?? [],
     },
   );
 }
@@ -702,9 +743,17 @@ test("new owner creates a company and reopens its signed business profile", asyn
   const created = state.requests.find(
     (request) => request.path === "/api/communities",
   );
-  const saved = state.requests.find((request) => request.path === "/events");
+  const saved = state.requests.find(
+    (request) => request.path === "/events" && request.body.kind === 47046,
+  );
+  const person = state.requests.find(
+    (request) => request.path === "/events" && request.body.kind === 0,
+  );
   assert.match(created.authorization, /^Nostr /u);
   assert.match(saved.authorization, /^Nostr /u);
+  assert.match(person.authorization, /^Nostr /u);
+  assert.equal(JSON.parse(person.body.content).display_name, "Lerato");
+  assert.equal(state.personEvent.pubkey, accountPubkey);
   assert.equal(JSON.parse(saved.body.content).profile.name, "Lerato Designs");
   assert.deepEqual(JSON.parse(saved.body.content).profile.links, [
     "https://leratodesigns.co.za",
@@ -736,6 +785,111 @@ test("new owner creates a company and reopens its signed business profile", asyn
       .count(),
     0,
   );
+  await page.close();
+});
+
+test("failed person profile save keeps the owner draft for retry after reopening", async () => {
+  const page = await tracedPage("person-name-retry");
+  await installMock(page);
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.evaluate(() =>
+    window.__COLONY_TEST__.personSaveFailures.push({
+      status: 503,
+      code: "unavailable",
+    }),
+  );
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("alert").getByText("couldn't save").waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Today" }).count(), 0);
+  assert.equal(
+    await page.evaluate(() =>
+      Object.keys(localStorage).some((key) =>
+        key.startsWith("colony-global-business-draft:"),
+      ),
+    ),
+    true,
+  );
+  await page.reload();
+  await page.getByRole("heading", { name: "Here's what I have" }).waitFor();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  assert.equal(JSON.parse(state.personEvent.content).display_name, "Lerato");
+  assert.equal(state.companies.length, 1);
+  await page.close();
+});
+
+test("lost person profile response is recovered from the signed relay copy", async () => {
+  const page = await tracedPage("person-name-lost-response");
+  await installMock(page);
+  await page.goto(url);
+  await signInNewAccount(page);
+  await completeBusiness(page);
+  await page.evaluate(() =>
+    window.__COLONY_TEST__.personSaveFailures.push({
+      status: 503,
+      code: "unavailable",
+      afterCommit: true,
+    }),
+  );
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  assert.equal(JSON.parse(state.personEvent.content).display_name, "Lerato");
+  assert.equal(
+    state.requests.filter(
+      (request) => request.path === "/events" && request.body.kind === 0,
+    ).length,
+    1,
+  );
+  await page.close();
+});
+
+test("company setup preserves an existing signed person profile", async () => {
+  const page = await tracedPage("person-name-preserved");
+  const existing = personEvent("Amira", { about: "Designer" });
+  await installMock(page, {
+    initialAccount: true,
+    companies: [defaultCompany],
+    profileEvent: null,
+    personEvent: existing,
+  });
+  await page.goto(url);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  assert.equal(state.personEvent.id, existing.id);
+  assert.equal(
+    state.requests.filter(
+      (request) => request.path === "/events" && request.body.kind === 0,
+    ).length,
+    0,
+  );
+  await page.close();
+});
+
+test("a tampered person profile cannot finish company setup", async () => {
+  const page = await tracedPage("person-name-signature");
+  const forged = {
+    ...personEvent("Amira"),
+    content: '{"display_name":"Forged"}',
+  };
+  await installMock(page, {
+    initialAccount: true,
+    companies: [defaultCompany],
+    profileEvent: null,
+    personEvent: forged,
+  });
+  await page.goto(url);
+  await completeBusiness(page);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("alert").getByText("couldn't save").waitFor();
+  const state = await page.evaluate(() => window.__COLONY_TEST__);
+  assert.equal(state.profileEvent, null);
+  assert.equal(await page.getByRole("heading", { name: "Today" }).count(), 0);
   await page.close();
 });
 
@@ -815,7 +969,9 @@ test("failed profile write keeps answers and retries without a second company", 
     1,
   );
   assert.equal(
-    state.requests.filter((request) => request.path === "/events").length,
+    state.requests.filter(
+      (request) => request.path === "/events" && request.body.kind === 47046,
+    ).length,
     2,
   );
   await page.close();
