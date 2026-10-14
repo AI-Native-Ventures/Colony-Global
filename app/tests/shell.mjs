@@ -1034,7 +1034,12 @@ test("configured credits show server-priced packs and open one signed Stripe che
     1,
   );
   await page.getByRole("radio", { name: /\$15\.00/u }).check();
-  await page.getByRole("button", { name: "Pay in browser" }).click();
+  await page
+    .getByRole("button", { name: "Pay in browser" })
+    .evaluate((button) => {
+      button.click();
+      button.click();
+    });
   await page
     .getByText("Finish paying in your browser", { exact: false })
     .waitFor();
@@ -1057,6 +1062,12 @@ test("configured credits show server-priced packs and open one signed Stripe che
     "https://checkout.stripe.com/c/pay/cs_test_colony",
   ]);
   assert.equal(state.creditIntents.length, 1);
+  assert.equal(
+    state.requests.filter(
+      (request) => request.path === "/api/payments/checkout",
+    ).length,
+    1,
+  );
   await page.close();
 });
 

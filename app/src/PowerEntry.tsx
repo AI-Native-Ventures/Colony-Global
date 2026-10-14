@@ -243,6 +243,10 @@ export function PowerEntry({
   }, [load]);
 
   const pending = snapshot ? openCreditIntent(snapshot) : null;
+  const latestPayment = snapshot ? latestIntent(snapshot) : null;
+  const paymentReceived =
+    latestPayment?.status === "paid" &&
+    latestPayment.idempotencyKey === checkoutAttempt.current?.key;
 
   async function refreshPayment() {
     if (busyRef.current || offline) return;
@@ -584,7 +588,7 @@ export function PowerEntry({
                     </p>
                   )}
                   <p className="first-run-help">
-                    You can change this later in Settings.
+                    You can return to this choice from Today.
                   </p>
                   <button
                     type="submit"
@@ -690,7 +694,9 @@ export function PowerEntry({
             {stage === "waiting" && (
               <>
                 <p className="first-run-lede">
-                  Finish paying in your browser. We'll bring you back here.
+                  {paymentReceived
+                    ? "Payment received. We're adding your credits."
+                    : "Finish paying in your browser. Return here to check your credits."}
                 </p>
                 {pending?.status === "uncertain" && (
                   <output className="first-run-notice">
