@@ -63,6 +63,9 @@ RUN apt-get update \
 # locations. The normal runtime strips it below; runtime-debug retains it.
 ENV CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
 COPY --from=planner /build/recipe.json recipe.json
+# cargo-chef's recipe omits local patch sources. Cargo resolves this patched
+# kube-client while cooking the relay dependency graph, before COPY . . below.
+COPY vendor/kube-client/ vendor/kube-client/
 # Cook the full workspace recipe. Relay deps include workspace siblings, so
 # scoping to -p buzz-relay misses transitive deps and re-builds them later.
 RUN cargo chef cook --release --recipe-path recipe.json
