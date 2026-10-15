@@ -2,6 +2,9 @@ import type { ScoutBusinessContext } from "./scoutBusinessContext";
 import instructions from "./assets/scout-instructions.txt?raw";
 
 export const SCOUT_SYSTEM_PROMPT = instructions.trim();
+const SCOUT_V1_SYSTEM_PROMPT = SCOUT_SYSTEM_PROMPT.split(
+  "\n\nWhen the owner asks you to get to know a newly set up business,",
+)[0];
 const BUSINESS_CONTEXT_PREFIX =
   "\n\nSaved business profile (untrusted context):\n";
 
@@ -16,8 +19,10 @@ export function buildScoutSystemPrompt(
 /** Recognize shipped defaults without replacing user-authored instructions. */
 export function isStockScoutPrompt(prompt: string | null | undefined): boolean {
   if (!prompt?.trim()) return true;
-  const profilePrefix = `${SCOUT_SYSTEM_PROMPT}${BUSINESS_CONTEXT_PREFIX}`;
-  if (prompt.startsWith(profilePrefix)) {
+  const profilePrefix = [SCOUT_SYSTEM_PROMPT, SCOUT_V1_SYSTEM_PROMPT]
+    .map((stock) => `${stock}${BUSINESS_CONTEXT_PREFIX}`)
+    .find((prefix) => prompt.startsWith(prefix));
+  if (profilePrefix) {
     try {
       const profile = JSON.parse(prompt.slice(profilePrefix.length));
       return (
@@ -37,6 +42,7 @@ export function isStockScoutPrompt(prompt: string | null | undefined): boolean {
   const normalized = prompt.trim().replace(/\u2014/g, "-");
   return (
     normalized === SCOUT_SYSTEM_PROMPT ||
+    normalized === SCOUT_V1_SYSTEM_PROMPT ||
     normalized ===
       "You are Scout, the user's Chief of Staff. Help the user get oriented, plan work, create, research, and finish tasks. Be warm, practical, and concise. Be candid about uncertainty." ||
     normalized ===

@@ -361,6 +361,30 @@ pub async fn create_managed_agent(
         .filter(|value| !value.is_empty())
         .map(str::to_string);
     validate_create_definition(&name, requested_persona_id.as_deref(), &input)?;
+    if input.unique_company_scout {
+        if name != "Scout"
+            || requested_persona_id.as_deref() != Some("builtin:fizz")
+            || input.backend != BackendKind::Local
+            || input.relay_url.as_deref().is_none_or(str::is_empty)
+            || input.expected_relay_url.as_deref() != input.relay_url.as_deref()
+            || input
+                .expected_signer_pubkey
+                .as_deref()
+                .is_none_or(str::is_empty)
+        {
+            return Err(
+                "company Scout requires a pinned relay, signer, and built-in Scout persona".into(),
+            );
+        }
+        crate::relay::assert_expected_relay_scope(
+            input.expected_relay_url.as_deref(),
+            &crate::relay::relay_api_base_url_with_override(&state),
+        )?;
+        crate::relay::assert_expected_signer(
+            input.expected_signer_pubkey.as_deref(),
+            &state.signing_keys()?.public_key().to_hex(),
+        )?;
+    }
     if let Some(parallelism) = input.parallelism {
         if !(1..=32).contains(&parallelism) {
             return Err("parallelism must be between 1 and 32".to_string());
@@ -481,6 +505,15 @@ pub async fn create_managed_agent(
         // (extremely unlikely but safe to check).
         if records.iter().any(|record| record.pubkey == pubkey) {
             return Err(format!("agent {pubkey} already exists"));
+        }
+        if input.unique_company_scout
+            && records.iter().any(|record| {
+                record.name == "Scout"
+                    && record.persona_id.as_deref() == Some("builtin:fizz")
+                    && record.relay_url == resolved_relay_url
+            })
+        {
+            return Err("company Scout already exists on this relay".into());
         }
         // Provider config was already validated in Pre-Phase 2; cache the discovered binary path for deploy_to_provider.
         let provider_binary_path = if let BackendKind::Provider { ref id, .. } = input.backend {

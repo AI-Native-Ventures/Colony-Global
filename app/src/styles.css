@@ -1106,6 +1106,107 @@ p {
   text-decoration: underline;
 }
 
+.scout-review-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.scout-review .eyebrow {
+  display: block;
+  margin-bottom: 12px;
+}
+.scout-start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 20px;
+}
+.scout-live-messages {
+  margin-top: 36px;
+}
+.scout-live-message {
+  display: flex;
+  gap: 14px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.scout-live-message strong {
+  font-size: 0.88rem;
+}
+.scout-live-message p {
+  margin-top: 5px;
+  white-space: pre-wrap;
+}
+.scout-live-ant {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+.scout-live-ant .ant-mark {
+  width: 28px;
+}
+.scout-profile-card,
+.scout-waiting-proposal {
+  margin-top: 28px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.scout-profile-card > p,
+.scout-waiting-proposal > p {
+  color: var(--muted);
+}
+.scout-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 24px;
+  margin-top: 28px;
+}
+.scout-profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.scout-profile-field input,
+.scout-profile-field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--canvas);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  resize: vertical;
+}
+.scout-profile-field input:focus,
+.scout-profile-field textarea:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.scout-profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 28px;
+}
+.scout-profile-actions .text-button,
+.scout-waiting-proposal .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
 @media (max-width: 760px) {
   .first-run-rail {
     flex-basis: 240px;
@@ -1183,5 +1284,17 @@ p {
   }
   .screen-content {
     padding: 30px 20px;
+  }
+  .scout-profile-grid {
+    grid-template-columns: 1fr;
+  }
+  .scout-profile-card,
+  .scout-waiting-proposal {
+    padding: 20px;
+  }
+  .scout-profile-actions {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
   }
 }

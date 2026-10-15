@@ -130,9 +130,13 @@ function SendBox({
 export function Conversations({
   client,
   ownPubkey,
+  initialChannelId,
+  initialThreadRootId,
 }: {
   client: Client;
   ownPubkey: string;
+  initialChannelId?: string | null;
+  initialThreadRootId?: string | null;
 }) {
   const [channels, setChannels] = useState<Conversation[]>([]);
   const [listState, setListState] = useState<"loading" | "ready" | "error">(
@@ -167,6 +171,8 @@ export function Conversations({
   const threadGeneration = useRef(0);
   const threadOpener = useRef<HTMLButtonElement | null>(null);
   const newTitleInput = useRef<HTMLInputElement | null>(null);
+  const initialSelectionApplied = useRef(false);
+  const initialThreadApplied = useRef(false);
   const selectedId = selected?.id ?? null;
 
   useEffect(() => {
@@ -180,6 +186,11 @@ export function Conversations({
       if (listGeneration.current !== generation) return;
       setChannels(next);
       setSelected((current) => {
+        if (!initialSelectionApplied.current && initialChannelId) {
+          initialSelectionApplied.current = true;
+          const target = next.find((item) => item.id === initialChannelId);
+          if (target) return target;
+        }
         if (!current) return null;
         const updated = next.find((item) => item.id === current.id);
         if (!updated) return null;
@@ -191,7 +202,7 @@ export function Conversations({
     } catch {
       if (listGeneration.current === generation) setListState("error");
     }
-  }, [client]);
+  }, [client, initialChannelId]);
 
   useEffect(() => {
     void refreshList();
@@ -241,6 +252,22 @@ export function Conversations({
     timelineChannelId === selectedId ? timelineState : "loading";
   const visibleThreadRoot =
     timelineChannelId === selectedId ? threadRoot : null;
+
+  useEffect(() => {
+    if (
+      !initialThreadRootId ||
+      initialThreadApplied.current ||
+      visibleTimelineState !== "ready"
+    )
+      return;
+    initialThreadApplied.current = true;
+    const root = messages.find((message) => message.id === initialThreadRootId);
+    if (root) setThreadRoot(root);
+    else
+      setNotice(
+        "The discussion is not in the current conversation window. Open it from the message when it loads.",
+      );
+  }, [initialThreadRootId, messages, visibleTimelineState]);
 
   const refreshThread = useCallback(async () => {
     if (!selectedId || !threadRoot) return null;

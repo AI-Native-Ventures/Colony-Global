@@ -14,6 +14,8 @@ const relaySecret = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 const relaySelf = getPublicKey(relaySecret);
 const accountSecret = Uint8Array.from({ length: 32 }, (_, index) => index + 33);
 const accountPubkey = getPublicKey(accountSecret);
+const scoutSecret = Uint8Array.from({ length: 32 }, (_, index) => index + 65);
+const scoutPubkey = getPublicKey(scoutSecret);
 const defaultCompany = {
   id: "11111111-1111-4111-8111-111111111111",
   slug: "lerato-designs",
@@ -57,6 +59,7 @@ function channelMessage(content, options = {}) {
               ]
             : [["e", options.rootId, "", "reply"]]
           : []),
+        ...(options.extraTags ?? []),
       ],
       content,
     },
@@ -74,6 +77,58 @@ function profileEvent(profile, revision = 1) {
         ["revision", String(revision)],
       ],
       content: JSON.stringify(profile),
+    },
+    relaySecret,
+  );
+}
+
+function scoutMessage(content, channelId = sampleChannelId, rootId = null) {
+  return finalizeEvent(
+    {
+      kind: 9,
+      created_at: Math.floor(Date.now() / 1_000),
+      tags: [["h", channelId], ...(rootId ? [["e", rootId, "", "reply"]] : [])],
+      content,
+    },
+    scoutSecret,
+  );
+}
+
+function profileProposalHead(profile, options = {}) {
+  const channelId = options.channelId ?? sampleChannelId;
+  const askId = options.askId ?? "44444444-4444-4444-8444-444444444444";
+  const rootId = options.rootId ?? "a".repeat(64);
+  return finalizeEvent(
+    {
+      kind: 30643,
+      created_at: Math.floor(Date.now() / 1_000),
+      tags: [
+        ["h", channelId],
+        ["d", `channel:${channelId}:ask:${askId}`],
+        ["e", rootId, "", "root"],
+        ["colony:profile-proposal", "1"],
+      ],
+      content: JSON.stringify({
+        schemaVersion: 1,
+        askId,
+        status: options.status ?? "open",
+        askerPubkey: scoutPubkey,
+        createdAt: new Date().toISOString(),
+        ask: {
+          schemaVersion: 1,
+          askId,
+          type: "approval",
+          category: "general",
+          title: "Your business profile",
+          threadRootEventId: rootId,
+          profileProposal: {
+            summary: "I added details from your website.",
+            profile,
+          },
+        },
+        ...(options.resolution ? { resolution: options.resolution } : {}),
+        sourceActionEventId: "b".repeat(64),
+      }),
     },
     relaySecret,
   );
@@ -112,8 +167,11 @@ async function tracedPage(name, viewport = { width: 1440, height: 900 }) {
 }
 
 async function installMock(page, options = {}) {
-  await page.exposeFunction("__COLONY_SIGN_PROFILE__", (profile) =>
-    profileEvent(profile),
+  await page.exposeFunction("__COLONY_SIGN_PROFILE__", (profile, revision) =>
+    profileEvent(profile, revision),
+  );
+  await page.exposeFunction("__COLONY_SIGN_PROPOSAL__", (profile, options) =>
+    profileProposalHead(profile, options),
   );
   await page.exposeFunction("__COLONY_SIGN_EVENT__", (event) =>
     finalizeEvent(
@@ -156,7 +214,17 @@ async function installMock(page, options = {}) {
         ],
         channels: persisted?.channels ?? structuredClone(settings.channels),
         events: persisted?.events ?? structuredClone(settings.events),
-        members: structuredClone(settings.members),
+        members: persisted?.members ?? structuredClone(settings.members),
+        agents: persisted?.agents ?? [],
+        agentConfig: persisted?.agentConfig ?? {
+          env_vars: {},
+          provider: null,
+          model: null,
+          preferred_runtime: null,
+        },
+        kickoffFailures: persisted?.kickoffFailures ?? [
+          ...settings.kickoffFailures,
+        ],
         sendFailures: [...settings.sendFailures],
         scopeSwitchOnRead: settings.scopeSwitchOnRead,
         nextMessageOffset: persisted?.nextMessageOffset ?? 1,
@@ -170,6 +238,7 @@ async function installMock(page, options = {}) {
         imported: false,
         companies: persisted?.companies ?? structuredClone(settings.companies),
         profileEvent: persisted?.profileEvent ?? settings.profileEvent,
+        askHeads: persisted?.askHeads ?? structuredClone(settings.askHeads),
         personEvent: persisted?.personEvent ?? settings.personEvent,
         creditBalanceCents:
           persisted?.creditBalanceCents ?? settings.creditBalanceCents,
@@ -182,6 +251,9 @@ async function installMock(page, options = {}) {
         ],
         companyFailures: [...settings.companyFailures],
         profileSaveFailures: [...settings.profileSaveFailures],
+        askResponseFailures: persisted?.askResponseFailures ?? [
+          ...settings.askResponseFailures,
+        ],
         personSaveFailures: [...settings.personSaveFailures],
         createFailures: [...settings.createFailures],
         profileQueryFailures: [...settings.profileQueryFailures],
@@ -196,9 +268,15 @@ async function installMock(page, options = {}) {
             workspaceFailures: state.workspaceFailures,
             channels: state.channels,
             events: state.events,
+            members: state.members,
+            agents: state.agents,
+            agentConfig: state.agentConfig,
+            kickoffFailures: state.kickoffFailures,
             nextMessageOffset: state.nextMessageOffset,
             companies: state.companies,
             profileEvent: state.profileEvent,
+            askHeads: state.askHeads,
+            askResponseFailures: state.askResponseFailures,
             personEvent: state.personEvent,
             creditBalanceCents: state.creditBalanceCents,
             creditIntents: state.creditIntents,
@@ -239,6 +317,88 @@ async function installMock(page, options = {}) {
               };
             case "get_channel_members":
               return { members: state.members, next_cursor: null };
+            case "get_global_agent_config":
+              return state.agentConfig;
+            case "set_global_agent_config":
+              state.agentConfig = payload.args.config;
+              persistCompany();
+              return {
+                config: state.agentConfig,
+                restarted_count: 0,
+                failed_restart_count: 0,
+              };
+            case "list_personas":
+              return [
+                {
+                  id: "builtin:fizz",
+                  system_prompt:
+                    "Use colony profile propose for a complete profile.",
+                  is_active: true,
+                },
+              ];
+            case "list_managed_agents":
+              return state.agents;
+            case "create_managed_agent": {
+              if (
+                payload.args.input.expectedRelayUrl !== state.activeRelay ||
+                payload.args.input.expectedSignerPubkey !== key
+              )
+                throw new Error("active community changed");
+              const existing = state.agents.find(
+                (agent) =>
+                  agent.relay_url === payload.args.input.relayUrl &&
+                  agent.persona_id === "builtin:fizz" &&
+                  agent.name === "Scout",
+              );
+              if (existing) throw new Error("company Scout already exists");
+              const agent = {
+                pubkey: settings.scoutPubkey,
+                name: "Scout",
+                persona_id: "builtin:fizz",
+                relay_url: payload.args.input.relayUrl,
+                status: "stopped",
+              };
+              state.agents.push(agent);
+              persistCompany();
+              return {
+                agent,
+                private_key_nsec: "test-only",
+                profile_sync_error: null,
+                spawn_error: null,
+              };
+            }
+            case "start_managed_agent": {
+              if (
+                payload.args.expectedRelayUrl !== state.activeRelay ||
+                payload.args.expectedSignerPubkey !== key
+              )
+                throw new Error("active community changed");
+              const agent = state.agents.find(
+                (item) => item.pubkey === payload.args.pubkey,
+              );
+              if (!agent) throw new Error("missing agent");
+              agent.status = "running";
+              persistCompany();
+              return agent;
+            }
+            case "add_channel_members": {
+              if (
+                payload.args.expectedRelayUrl !== state.activeRelay ||
+                payload.args.expectedSignerPubkey !== key
+              )
+                throw new Error("active community changed");
+              for (const pubkey of payload.args.pubkeys) {
+                if (!state.members.some((member) => member.pubkey === pubkey))
+                  state.members.push({
+                    pubkey,
+                    role: "bot",
+                    is_agent: true,
+                    display_name: "Scout",
+                  });
+              }
+              persistCompany();
+              return { added: payload.args.pubkeys, errors: [] };
+            }
             case "get_channel_window":
               return state.events.filter(
                 (event) =>
@@ -273,6 +433,35 @@ async function installMock(page, options = {}) {
                 payload.args.expectedSignerPubkey !== key
               )
                 throw new Error("active community changed");
+              if (payload.args.setupFirstTurn) {
+                const existing = state.events.find((event) =>
+                  event.tags.some(
+                    (tag) =>
+                      tag[0] === "client" &&
+                      tag[1] === payload.args.setupMarker,
+                  ),
+                );
+                if (existing)
+                  return {
+                    event_id: existing.id,
+                    created_at: existing.created_at,
+                  };
+                const event = await window.__COLONY_SIGN_EVENT__({
+                  kind: 9,
+                  content: payload.args.content,
+                  tags: [
+                    ["h", payload.args.channelId],
+                    ["p", payload.args.mentionPubkeys[0]],
+                    ["colony:setup", "first-turn"],
+                    ["client", payload.args.setupMarker],
+                  ],
+                });
+                state.events.push(event);
+                const failure = state.kickoffFailures.shift();
+                persistCompany();
+                if (failure) throw new Error("Kickoff response lost");
+                return { event_id: event.id, created_at: event.created_at };
+              }
               const failure = state.sendFailures.shift();
               if (failure) throw new Error(failure);
               const event = await window.__COLONY_SIGN_CHANNEL_MESSAGE__({
@@ -297,9 +486,13 @@ async function installMock(page, options = {}) {
                 payload.args.expectedSignerPubkey !== key
               )
                 throw new Error("active community changed");
+              const existing = state.channels.find(
+                (channel) => channel.id === payload.args.requestedChannelId,
+              );
+              if (existing) return existing;
               const channel = {
                 ...settings.sampleChannel,
-                id: crypto.randomUUID(),
+                id: payload.args.requestedChannelId ?? crypto.randomUUID(),
                 name: payload.args.name,
               };
               state.channels.push(channel);
@@ -495,6 +688,7 @@ async function installMock(page, options = {}) {
           return json({ self: settings.relaySelf });
         }
         if (path === "/query") {
+          if (body?.[0]?.kinds?.includes(30643)) return json(state.askHeads);
           if (body?.[0]?.kinds?.includes(0)) {
             const next = state.personQueryFailures.shift();
             if (next) return json({ error: next.code }, next.status);
@@ -510,6 +704,44 @@ async function installMock(page, options = {}) {
           return json(state.profileEvent ? [state.profileEvent] : []);
         }
         if (path === "/events") {
+          if (body.kind === 47033) {
+            const answer = JSON.parse(body.content);
+            const current = state.askHeads.find((head) =>
+              head.tags.some(
+                (tag) =>
+                  tag[0] === "d" &&
+                  tag[1] ===
+                    `channel:${body.tags.find((tag) => tag[0] === "h")?.[1]}:ask:${answer.askId}`,
+              ),
+            );
+            if (!current || current.id !== answer.expectedHeadEventId)
+              return json({ error: "stale_head" }, 409);
+            const next = state.askResponseFailures.shift();
+            persistCompany();
+            if (next && !next.afterCommit)
+              return json({ error: next.code }, next.status);
+            const old = JSON.parse(current.content);
+            const resolved = await window.__COLONY_SIGN_PROPOSAL__(
+              old.ask.profileProposal.profile,
+              {
+                channelId: body.tags.find((tag) => tag[0] === "h")?.[1],
+                askId: answer.askId,
+                rootId: old.ask.threadRootEventId,
+                status: "resolved",
+                resolution: {
+                  outcome: answer.outcome,
+                  reason: answer.reason,
+                  resolvedByPubkey: key,
+                  resolvedAt: new Date().toISOString(),
+                  responseEventId: body.id,
+                },
+              },
+            );
+            state.askHeads = [resolved];
+            persistCompany();
+            if (next) return json({ error: next.code }, next.status);
+            return json({ event_id: body.id, accepted: true, message: "" });
+          }
           if (body.kind === 0) {
             const next = state.personSaveFailures.shift();
             if (next && !next.afterCommit)
@@ -522,19 +754,30 @@ async function installMock(page, options = {}) {
           const next = state.profileSaveFailures.shift();
           if (next) return json({ error: next.code }, next.status);
           const action = JSON.parse(body.content);
-          state.profileEvent = await window.__COLONY_SIGN_PROFILE__({
-            ...action.profile,
-            bestSellers: [],
-            voiceWords: [],
-            contact: {},
-            invoice: {},
-            socialAccounts: {},
-          });
+          const canonicalProfile = { ...action.profile };
+          if (canonicalProfile.bestSellers?.length === 0)
+            delete canonicalProfile.bestSellers;
+          if (canonicalProfile.priceRange == null)
+            delete canonicalProfile.priceRange;
+          if (canonicalProfile.website == null) delete canonicalProfile.website;
+          state.profileEvent = await window.__COLONY_SIGN_PROFILE__(
+            action.expectedRevision == null
+              ? {
+                  ...canonicalProfile,
+                  bestSellers: [],
+                  voiceWords: [],
+                  contact: {},
+                  invoice: {},
+                  socialAccounts: {},
+                }
+              : canonicalProfile,
+            (action.expectedRevision ?? 0) + 1,
+          );
           persistCompany();
           return json({
             event_id: body.id,
             accepted: true,
-            message: 'response:{"revision":1}',
+            message: `response:{"revision":${(action.expectedRevision ?? 0) + 1}}`,
           });
         }
         throw new Error(`Unexpected relay path ${path}`);
@@ -601,10 +844,14 @@ async function installMock(page, options = {}) {
         },
       ],
       sendFailures: options.sendFailures ?? [],
+      kickoffFailures: options.kickoffFailures ?? [],
+      scoutPubkey,
       scopeSwitchOnRead: options.scopeSwitchOnRead,
       sampleChannel: sampleChannel(),
       companyFailures: options.companyFailures ?? [],
       profileSaveFailures: options.profileSaveFailures ?? [],
+      askHeads: options.askHeads ?? [],
+      askResponseFailures: options.askResponseFailures ?? [],
       personSaveFailures: options.personSaveFailures ?? [],
       createFailures: options.createFailures ?? [],
       profileQueryFailures: options.profileQueryFailures ?? [],
@@ -709,6 +956,436 @@ test("returning account restores via signed lookup into the ant workroom", async
     await page.evaluate(() => document.documentElement.scrollWidth <= 1024),
     true,
   );
+  await page.close();
+});
+
+test("owner reviews signed Scout proposal, edits a field, then confirms the saved profile", async () => {
+  const page = await tracedPage("scout-profile-review");
+  const proposed = {
+    ...defaultProfile,
+    whatYouSell: "Linen clothing made in Johannesburg",
+    whoBuys: "People who like local clothing",
+    bestSellers: ["Linen dress"],
+    voiceWords: ["warm", "local"],
+    contact: {},
+    invoice: {},
+    socialAccounts: {},
+  };
+  await installMock(page, {
+    initialAccount: true,
+    channels: [sampleChannel("Getting started")],
+    members: [
+      {
+        pubkey: accountPubkey,
+        role: "member",
+        is_agent: false,
+        display_name: "Lerato",
+      },
+      {
+        pubkey: scoutPubkey,
+        role: "bot",
+        is_agent: true,
+        display_name: "Scout",
+      },
+    ],
+    events: [
+      scoutMessage(
+        "I have read your business profile. I'm checking the links you shared.",
+      ),
+    ],
+    askHeads: [profileProposalHead(proposed)],
+  });
+  await page.goto(url);
+  const card = page.getByRole("region", {
+    name: "Business profile for review",
+  });
+  await card.waitFor();
+  if (process.env.COLONY_SCOUT_REVIEW_SHOT)
+    await page.screenshot({ path: process.env.COLONY_SCOUT_REVIEW_SHOT });
+  await page
+    .getByText("I have read your business profile.", { exact: false })
+    .waitFor();
+  await card
+    .getByRole("textbox", { name: "Who buys" })
+    .fill("Local shoppers and boutiques");
+  await card.getByRole("button", { name: "Looks right" }).click();
+  await page.getByText("Your business profile is confirmed.").waitFor();
+  const result = await page.evaluate(() => ({
+    writes: window.__COLONY_TEST__.requests.filter(
+      (request) => request.path === "/events",
+    ),
+    current: JSON.parse(window.__COLONY_TEST__.profileEvent.content),
+    ask: JSON.parse(window.__COLONY_TEST__.askHeads[0].content),
+  }));
+  assert.deepEqual(
+    result.writes.map((write) => write.body.kind),
+    [47046, 47033],
+  );
+  assert.equal(JSON.parse(result.writes[0].body.content).expectedRevision, 1);
+  assert.equal(result.current.whoBuys, "Local shoppers and boutiques");
+  assert.equal(result.ask.status, "resolved");
+  assert.equal(result.ask.resolution.outcome, "approved");
+  await page.close();
+});
+
+test("clearing Scout's best sellers can be confirmed when the relay omits the empty list", async () => {
+  const page = await tracedPage("scout-clear-best-sellers");
+  await installMock(page, {
+    initialAccount: true,
+    channels: [sampleChannel("Getting started")],
+    members: [
+      {
+        pubkey: accountPubkey,
+        role: "member",
+        is_agent: false,
+        display_name: "Lerato",
+      },
+      {
+        pubkey: scoutPubkey,
+        role: "bot",
+        is_agent: true,
+        display_name: "Scout",
+      },
+    ],
+    events: [scoutMessage("I have a draft profile for you.")],
+    askHeads: [
+      profileProposalHead({
+        ...defaultProfile,
+        bestSellers: ["Linen dress"],
+        voiceWords: [],
+        contact: {},
+        invoice: {},
+        socialAccounts: {},
+      }),
+    ],
+  });
+  await page.goto(url);
+  const card = page.getByRole("region", {
+    name: "Business profile for review",
+  });
+  await card.waitFor();
+  await card.getByRole("textbox", { name: "Best sellers" }).fill("");
+  await card.getByRole("button", { name: "Looks right" }).click();
+  await page.getByText("Your business profile is confirmed.").waitFor();
+  const saved = await page.evaluate(() =>
+    JSON.parse(window.__COLONY_TEST__.profileEvent.content),
+  );
+  assert.equal(Object.hasOwn(saved, "bestSellers"), false);
+  await page.close();
+});
+
+test("Scout confirmation refuses to overwrite a profile changed by another owner action", async () => {
+  const page = await tracedPage("scout-concurrent-profile-change");
+  await installMock(page, {
+    initialAccount: true,
+    channels: [sampleChannel("Getting started")],
+    members: [
+      {
+        pubkey: accountPubkey,
+        role: "member",
+        is_agent: false,
+        display_name: "Lerato",
+      },
+      {
+        pubkey: scoutPubkey,
+        role: "bot",
+        is_agent: true,
+        display_name: "Scout",
+      },
+    ],
+    events: [scoutMessage("Please review this profile.")],
+    askHeads: [
+      profileProposalHead({
+        ...defaultProfile,
+        bestSellers: [],
+        voiceWords: [],
+        contact: {},
+        invoice: {},
+        socialAccounts: {},
+      }),
+    ],
+  });
+  await page.goto(url);
+  const card = page.getByRole("region", {
+    name: "Business profile for review",
+  });
+  await card.waitFor();
+  await page.evaluate(async () => {
+    window.__COLONY_TEST__.profileEvent = await window.__COLONY_SIGN_PROFILE__(
+      {
+        ...JSON.parse(window.__COLONY_TEST__.profileEvent.content),
+        whatYouSell: "A newly updated product range",
+      },
+      2,
+    );
+  });
+  await card.getByRole("button", { name: "Looks right" }).click();
+  await page
+    .getByText("Colony couldn't finish confirming this profile.", {
+      exact: false,
+    })
+    .waitFor();
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__COLONY_TEST__.requests.filter(
+          (request) => request.path === "/events",
+        ).length,
+    ),
+    0,
+  );
+  await page.close();
+});
+
+test("Today shows Scout's signed reply from the first-turn thread", async () => {
+  const page = await tracedPage("scout-first-thread-reply");
+  const kickoff = channelMessage("Please get to know the business.", {
+    extraTags: [
+      ["p", scoutPubkey],
+      ["colony:setup", "first-turn"],
+      ["client", `colony-global-scout-first-turn:${defaultCompany.id}`],
+    ],
+  });
+  await installMock(page, {
+    initialAccount: true,
+    channels: [sampleChannel("Getting started")],
+    members: [
+      {
+        pubkey: accountPubkey,
+        role: "member",
+        is_agent: false,
+        display_name: "Lerato",
+      },
+      {
+        pubkey: scoutPubkey,
+        role: "bot",
+        is_agent: true,
+        display_name: "Scout",
+      },
+    ],
+    events: [
+      kickoff,
+      scoutMessage(
+        "I am reading your business links now.",
+        sampleChannelId,
+        kickoff.id,
+      ),
+    ],
+  });
+  await page.goto(url);
+  await page.getByText("I am reading your business links now.").waitFor();
+  assert.equal(
+    await page.getByText("Waiting for Scout's first reply.").count(),
+    0,
+  );
+  await page.close();
+});
+
+test("Change something opens the proposal discussion in a side thread", async () => {
+  const page = await tracedPage("scout-proposal-thread");
+  const kickoff = channelMessage("Please get to know the business.");
+  await installMock(page, {
+    initialAccount: true,
+    channels: [sampleChannel("Getting started")],
+    members: [
+      {
+        pubkey: accountPubkey,
+        role: "member",
+        is_agent: false,
+        display_name: "Lerato",
+      },
+      {
+        pubkey: scoutPubkey,
+        role: "bot",
+        is_agent: true,
+        display_name: "Scout",
+      },
+    ],
+    events: [kickoff, scoutMessage("I have read the business profile.")],
+    askHeads: [
+      profileProposalHead(
+        {
+          ...defaultProfile,
+          bestSellers: [],
+          voiceWords: [],
+          contact: {},
+          invoice: {},
+          socialAccounts: {},
+        },
+        { rootId: kickoff.id },
+      ),
+    ],
+  });
+  await page.goto(url);
+  await page.getByRole("button", { name: "Change something" }).click();
+  await page.getByRole("heading", { name: "Getting started" }).waitFor();
+  await page.getByRole("complementary", { name: "Message thread" }).waitFor();
+  await page
+    .getByRole("complementary", { name: "Message thread" })
+    .getByText("Please get to know the business.")
+    .waitFor();
+  const result = await page.evaluate(() => ({
+    writes: window.__COLONY_TEST__.requests.filter(
+      (request) => request.path === "/events",
+    ),
+    ask: JSON.parse(window.__COLONY_TEST__.askHeads[0].content),
+  }));
+  assert.deepEqual(
+    result.writes.map((write) => write.body.kind),
+    [47033],
+  );
+  assert.equal(result.ask.resolution.outcome, "rejected");
+  await page.close();
+});
+
+test("interrupted Scout confirmation recovers the edited profile without a second profile write", async () => {
+  const page = await tracedPage("scout-profile-recovery");
+  const proposed = {
+    ...defaultProfile,
+    whoBuys: "Local shoppers",
+    bestSellers: [],
+    voiceWords: [],
+    contact: {},
+    invoice: {},
+    socialAccounts: {},
+  };
+  await installMock(page, {
+    initialAccount: true,
+    channels: [sampleChannel("Getting started")],
+    members: [
+      {
+        pubkey: accountPubkey,
+        role: "member",
+        is_agent: false,
+        display_name: "Lerato",
+      },
+      {
+        pubkey: scoutPubkey,
+        role: "bot",
+        is_agent: true,
+        display_name: "Scout",
+      },
+    ],
+    events: [scoutMessage("I have read your business profile.")],
+    askHeads: [profileProposalHead(proposed)],
+    askResponseFailures: [{ code: "temporarily_unavailable", status: 503 }],
+  });
+  await page.goto(url);
+  const card = page.getByRole("region", {
+    name: "Business profile for review",
+  });
+  await card.waitFor();
+  await card
+    .getByRole("textbox", { name: "Who buys" })
+    .fill("Boutiques and local shoppers");
+  await card.getByRole("button", { name: "Looks right" }).click();
+  await page
+    .getByText("Colony couldn't finish confirming this profile.", {
+      exact: false,
+    })
+    .waitFor();
+  const first = await page.evaluate(() => ({
+    profile: JSON.parse(window.__COLONY_TEST__.profileEvent.content),
+    ask: JSON.parse(window.__COLONY_TEST__.askHeads[0].content),
+  }));
+  assert.equal(first.profile.whoBuys, "Boutiques and local shoppers");
+  assert.equal(first.ask.status, "open");
+
+  await page.reload();
+  await card.waitFor();
+  await page
+    .getByText("Your edits were recovered.", { exact: false })
+    .waitFor();
+  assert.equal(
+    await card.getByRole("textbox", { name: "Who buys" }).inputValue(),
+    "Boutiques and local shoppers",
+  );
+  await card.getByRole("button", { name: "Finish confirmation" }).click();
+  await page.getByText("Your business profile is confirmed.").waitFor();
+  const result = await page.evaluate(() => ({
+    writes: window.__COLONY_TEST__.requests.filter(
+      (request) => request.path === "/events",
+    ),
+    ask: JSON.parse(window.__COLONY_TEST__.askHeads[0].content),
+  }));
+  assert.deepEqual(
+    result.writes.map((write) => write.body.kind),
+    [47033],
+  );
+  assert.equal(result.ask.status, "resolved");
+  await page.close();
+});
+
+test("funded owner starts one real Scout kickoff and a lost reply cannot duplicate it", async () => {
+  const page = await tracedPage("scout-first-turn-startup");
+  await installMock(page, {
+    initialAccount: true,
+    creditsEnabled: true,
+    creditBalanceCents: 5000,
+    kickoffFailures: [{ afterCommit: true }],
+  });
+  await page.goto(url);
+  await page
+    .getByRole("heading", { name: "Scout has not started here yet" })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Start Scout with Colony credits" })
+    .click();
+  await page.getByText("Scout couldn't start.", { exact: false }).waitFor();
+  await page
+    .getByRole("button", { name: "Start Scout with Colony credits" })
+    .click();
+  await page.getByText("Waiting for Scout's first reply.").waitFor();
+  const first = await page.evaluate(() => ({
+    agents: window.__COLONY_TEST__.agents,
+    channels: window.__COLONY_TEST__.channels,
+    setup: window.__COLONY_TEST__.events.filter((event) =>
+      event.tags.some(
+        (tag) => tag[0] === "colony:setup" && tag[1] === "first-turn",
+      ),
+    ),
+    config: window.__COLONY_TEST__.agentConfig,
+  }));
+  assert.equal(first.agents.length, 1);
+  assert.equal(first.agents[0].status, "running");
+  assert.equal(first.channels.length, 1);
+  assert.equal(first.setup.length, 1);
+  assert.equal(first.setup[0].pubkey, accountPubkey);
+  assert.ok(
+    first.setup[0].tags.some((tag) => tag[0] === "p" && tag[1] === scoutPubkey),
+  );
+  assert.equal(first.config.provider, "colony-credits");
+  assert.equal(
+    await page.getByText("I have read your business profile.").count(),
+    0,
+  );
+  await page.reload();
+  await page.getByText("Waiting for Scout's first reply.").waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Start Scout with Colony credits" })
+      .count(),
+    0,
+  );
+  await page.close();
+});
+
+test("Scout startup refuses unfunded credits before creating an agent or channel", async () => {
+  const page = await tracedPage("scout-first-turn-no-funds");
+  await installMock(page, { initialAccount: true, creditsEnabled: true });
+  await page.goto(url);
+  await page
+    .getByRole("button", { name: "Start Scout with Colony credits" })
+    .click();
+  await page
+    .getByText("Scout needs available Colony credits", { exact: false })
+    .waitFor();
+  const result = await page.evaluate(() => ({
+    agents: window.__COLONY_TEST__.agents.length,
+    channels: window.__COLONY_TEST__.channels.length,
+    config: window.__COLONY_TEST__.agentConfig.provider,
+  }));
+  assert.deepEqual(result, { agents: 0, channels: 0, config: null });
   await page.close();
 });
 

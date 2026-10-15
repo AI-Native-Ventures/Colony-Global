@@ -2,6 +2,7 @@ use buzz_core::company_records::{
     ask_d_tag, AskAction, AskActionKind, AskCategory, AskHead, AskOutcome, AskRecord, AskResponse,
     AskSubject, AskSubjectKind, AskType, HireProposal, COMPANY_RECORD_SCHEMA_VERSION,
 };
+use buzz_core::profile_proposal::ProfileProposal;
 use serde_json::{json, Value};
 
 use crate::client::BuzzClient;
@@ -53,6 +54,77 @@ pub async fn dispatch(command: AsksCmd, client: &BuzzClient) -> Result<(), CliEr
     }
 }
 
+fn profile_ask(
+    ask_id: Uuid,
+    thread_root: String,
+    proposal: ProfileProposal,
+) -> Result<AskRecord, CliError> {
+    buzz_core::profile_proposal::validate_profile_proposal(&proposal)
+        .map_err(|error| CliError::Usage(format!("invalid profile proposal: {error}")))?;
+    let ask = AskRecord {
+        schema_version: COMPANY_RECORD_SCHEMA_VERSION,
+        ask_id,
+        ask_type: AskType::Approval,
+        category: AskCategory::General,
+        title: "Your business profile".into(),
+        body: Some(proposal.summary.clone()),
+        thread_root_event_id: Some(thread_root),
+        thread_start: None,
+        addressee_pubkey: None,
+        decide_by: None,
+        options: None,
+        items: None,
+        tool_consent: None,
+        subject: None,
+        member_proposal: None,
+        secret_request: None,
+        hire_proposal: None,
+        duty_proposal: None,
+        spend_allowance_proposal: None,
+        profile_proposal: Some(proposal),
+    };
+    buzz_core::company_records::validate_ask_record(&ask, false)
+        .map_err(|error| CliError::Usage(format!("invalid profile proposal ask: {error}")))?;
+    Ok(ask)
+}
+
+pub(crate) async fn propose_profile(
+    client: &BuzzClient,
+    channel: &str,
+    thread_root: &str,
+    proposal_json: &str,
+) -> Result<(), CliError> {
+    let channel_id = parse_uuid(channel)?;
+    let thread_root = parse_event_id(thread_root)?.to_hex();
+    let input = read_or_stdin(proposal_json)?;
+    let proposal: ProfileProposal = serde_json::from_str(&input)
+        .map_err(|error| CliError::Usage(format!("invalid profile proposal JSON: {error}")))?;
+    let ask_id = Uuid::new_v4();
+    let ask = profile_ask(ask_id, thread_root, proposal)?;
+    let action = AskAction {
+        schema_version: COMPANY_RECORD_SCHEMA_VERSION,
+        ask_id,
+        action: AskActionKind::Create,
+        expected_head_event_id: None,
+        ask: Some(ask),
+        reason: None,
+    };
+    let builder =
+        buzz_sdk::asks::build_ask_action(channel_id, &action).map_err(crate::validate::sdk_err)?;
+    let event = client.sign_event(builder)?;
+    let response = client.submit_event(event).await?;
+    parse_write_response(&response, "profile proposal ask was rejected")?;
+    println!(
+        "{}",
+        crate::client::create_response_with_id_if_accepted(
+            &response,
+            "ask_id",
+            &ask_id.to_string(),
+        )
+    );
+    Ok(())
+}
+
 async fn propose_hire(
     client: &BuzzClient,
     channel: &str,
@@ -88,6 +160,7 @@ async fn propose_hire(
         hire_proposal: Some(proposal.clone()),
         duty_proposal: None,
         spend_allowance_proposal: None,
+        profile_proposal: None,
     };
     let action = AskAction {
         schema_version: COMPANY_RECORD_SCHEMA_VERSION,
@@ -287,5 +360,22 @@ mod tests {
         });
         assert_eq!(tag_values(&event, "h"), ["channel", "other"]);
         assert_eq!(tag_values(&event, "d"), ["ask"]);
+    }
+
+    #[test]
+    fn profile_propose_builds_a_valid_ask_from_a_complete_profile() {
+        let proposal: ProfileProposal = serde_json::from_value(json!({
+            "summary": "I added the best sellers you listed.",
+            "profile": {
+                "schemaVersion": 1,
+                "name": "Lerato Designs",
+                "timeZone": "Africa/Johannesburg"
+            }
+        }))
+        .expect("profile proposal");
+        let ask = profile_ask(Uuid::from_u128(8), "a".repeat(64), proposal)
+            .expect("valid profile proposal ask");
+        assert_eq!(ask.category, AskCategory::General);
+        assert!(ask.profile_proposal.is_some());
     }
 }

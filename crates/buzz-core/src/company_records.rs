@@ -647,6 +647,9 @@ pub struct AskRecord {
     /// Typed employee allowance change attached to a money approval ask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spend_allowance_proposal: Option<crate::company_spend::EmployeeAllowanceAction>,
+    /// Typed business profile proposal attached to a general approval ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_proposal: Option<crate::profile_proposal::ProfileProposal>,
 }
 
 /// Opening title and optional context for a new ask thread.
@@ -2324,6 +2327,7 @@ pub fn validate_ask_record(
         }
         _ => {}
     }
+    crate::profile_proposal::validate_profile_proposal_ask(ask)?;
     Ok(())
 }
 
@@ -2407,7 +2411,9 @@ pub fn validate_ask_response(
             "secret binding references are only valid for secret asks",
         ));
     }
-    if (ask.hire_proposal.is_some() || ask.duty_proposal.is_some())
+    if (ask.hire_proposal.is_some()
+        || ask.duty_proposal.is_some()
+        || ask.profile_proposal.is_some())
         && !matches!(response.outcome, O::Approved | O::Rejected)
     {
         return Err(CompanyRecordError::Invalid(
@@ -2666,6 +2672,15 @@ pub fn ask_resolution_denied_reason(
             _ => Some("Only company owners, partners and admins can decide this"),
         };
     }
+    if ask.profile_proposal.is_some() {
+        if resolver.is_agent {
+            return Some("Agents cannot approve the business profile");
+        }
+        return match resolver.community_role {
+            Some(CommunityRole::Owner | CommunityRole::Admin) => None,
+            _ => Some("Only company owners and admins can approve the business profile"),
+        };
+    }
     if ask.member_proposal.is_some() {
         if resolver.is_agent {
             return Some("Agents cannot approve member-position proposals");
@@ -2752,6 +2767,7 @@ mod tests {
             hire_proposal: None,
             duty_proposal: None,
             spend_allowance_proposal: None,
+            profile_proposal: None,
         }
     }
 

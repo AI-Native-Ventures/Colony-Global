@@ -21,6 +21,14 @@ test("Scout has real business Chief of Staff instructions without mascot copy", 
     /\b(?:Buzz|Fizz|Honey|Pollen|bee)\b|\u{1f41d}/iu,
   );
   assert.equal(isStockScoutPrompt(legacy), true);
+  assert.equal(
+    isStockScoutPrompt(
+      SCOUT_SYSTEM_PROMPT.split(
+        "\n\nWhen the owner asks you to get to know a newly set up business,",
+      )[0],
+    ),
+    true,
+  );
   assert.equal(isStockScoutPrompt(`${legacy} Follow my custom policy.`), false);
 });
 

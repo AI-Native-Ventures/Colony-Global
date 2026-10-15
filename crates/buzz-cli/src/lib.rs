@@ -1324,11 +1324,23 @@ pub enum TeamCmd {
     },
 }
 
-/// Commands for reading the company business profile.
+/// Commands for reading and proposing the company business profile.
 #[derive(Subcommand)]
 pub enum ProfileCmd {
     /// Show the company's current business profile (relay-signed head)
     Show,
+    /// Propose a completed business profile for owner review in a channel thread
+    Propose {
+        /// Channel UUID containing the thread
+        #[arg(long)]
+        channel: String,
+        /// Existing thread root event ID
+        #[arg(long)]
+        thread_root: String,
+        /// ProfileProposal JSON with summary and complete profile, or '-' for stdin
+        #[arg(long)]
+        proposal: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3441,6 +3453,7 @@ mod tests {
             names(&cmd, "asks"),
             vec!["cancel", "create", "list", "propose-hire", "respond"]
         );
+        assert_eq!(names(&cmd, "profile"), vec!["propose", "show"]);
         assert_eq!(
             names(&cmd, "messages"),
             vec![

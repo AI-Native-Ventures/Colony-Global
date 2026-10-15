@@ -6,6 +6,10 @@ const MAX_RESPONSE_BYTES = 64 * 1024;
 const PROFILE_D = "business-profile";
 const PROFILE_HEAD_KIND = 30657;
 const PROFILE_ACTION_KIND = 47046;
+const ASK_HEAD_KIND = 30643;
+const ASK_RESPONSE_KIND = 47033;
+const ID = /^[0-9a-f]{64}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERSON_PROFILE_KIND = 0;
 
 export type Company = {
@@ -34,6 +38,42 @@ export type BusinessProfile = {
   links?: string[];
   website?: string | null;
   goals?: string[];
+  bestSellers?: string[];
+  priceRange?: string | null;
+  voiceWords?: string[];
+  contact?: {
+    email?: string | null;
+    phone?: string | null;
+    whatsapp?: string | null;
+    address?: string | null;
+  };
+  buyLink?: string | null;
+  invoice?: {
+    registeredName?: string | null;
+    registrationNumber?: string | null;
+    vatNumber?: string | null;
+    bankDetails?: string | null;
+  };
+  socialAccounts?: {
+    instagram?: string | null;
+    facebook?: string | null;
+    tiktok?: string | null;
+    linkedin?: string | null;
+    x?: string | null;
+  };
+};
+
+export type ProfileProposalHead = {
+  eventId: string;
+  askId: string;
+  channelId: string;
+  threadRootId: string;
+  askerPubkey: string;
+  status: "open" | "resolved" | "cancelled";
+  summary: string;
+  profile: BusinessProfile;
+  resolvedByPubkey: string | null;
+  outcome: "approved" | "rejected" | null;
 };
 
 export class CompanyError extends Error {
@@ -302,6 +342,49 @@ function profileMatches(
   );
 }
 
+export function sameFullProfile(
+  left: BusinessProfile,
+  right: BusinessProfile,
+): boolean {
+  const canonical = (profile: BusinessProfile) => ({
+    schemaVersion: profile.schemaVersion,
+    name: profile.name,
+    timeZone: profile.timeZone,
+    whatYouSell: profile.whatYouSell ?? null,
+    bestSellers: profile.bestSellers ?? [],
+    priceRange: profile.priceRange ?? null,
+    whoBuys: profile.whoBuys ?? null,
+    whereYouSell: profile.whereYouSell ?? [],
+    city: profile.city ?? null,
+    country: profile.country ?? null,
+    links: profile.links ?? [],
+    website: profile.website ?? null,
+    voiceWords: profile.voiceWords ?? [],
+    goals: profile.goals ?? [],
+    contact: {
+      email: profile.contact?.email ?? null,
+      phone: profile.contact?.phone ?? null,
+      whatsapp: profile.contact?.whatsapp ?? null,
+      address: profile.contact?.address ?? null,
+    },
+    buyLink: profile.buyLink ?? null,
+    invoice: {
+      registeredName: profile.invoice?.registeredName ?? null,
+      registrationNumber: profile.invoice?.registrationNumber ?? null,
+      vatNumber: profile.invoice?.vatNumber ?? null,
+      bankDetails: profile.invoice?.bankDetails ?? null,
+    },
+    socialAccounts: {
+      instagram: profile.socialAccounts?.instagram ?? null,
+      facebook: profile.socialAccounts?.facebook ?? null,
+      tiktok: profile.socialAccounts?.tiktok ?? null,
+      linkedin: profile.socialAccounts?.linkedin ?? null,
+      x: profile.socialAccounts?.x ?? null,
+    },
+  });
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+}
+
 /** Signed company discovery, creation and shared-profile operations for the shipped app. */
 export function createCompanyClient(
   provisionBaseUrl: string,
@@ -415,6 +498,139 @@ export function createCompanyClient(
     return heads.sort((a, b) => b.revision - a.revision)[0] ?? null;
   }
 
+  async function relaySelf(company: Company, config: ProvisioningConfig) {
+    const info = object(
+      await request(
+        companyBase(company, config),
+        "/",
+        "GET",
+        undefined,
+        false,
+        "application/nostr+json",
+      ),
+    );
+    if (!hexKey(info?.self)) throw new CompanyError("invalid_response");
+    return info.self;
+  }
+
+  function parseProposalHead(
+    value: unknown,
+    self: string,
+    channelId: string,
+  ): ProfileProposalHead | null {
+    const event = object(value);
+    if (
+      !event ||
+      event.kind !== ASK_HEAD_KIND ||
+      event.pubkey !== self ||
+      !verifyEvent(event as Parameters<typeof verifyEvent>[0]) ||
+      typeof event.id !== "string" ||
+      !ID.test(event.id) ||
+      oneTag(event.tags, "h") !== channelId ||
+      oneTag(event.tags, "colony:profile-proposal") !== "1" ||
+      typeof event.content !== "string"
+    )
+      return null;
+    let head: Record<string, unknown> | null;
+    try {
+      head = object(JSON.parse(event.content));
+    } catch {
+      throw new CompanyError("invalid_response");
+    }
+    const ask = object(head?.ask);
+    const proposal = object(ask?.profileProposal);
+    const profile = object(proposal?.profile);
+    const resolution =
+      head?.resolution == null ? null : object(head.resolution);
+    if (
+      !head ||
+      head.schemaVersion !== 1 ||
+      typeof head.askId !== "string" ||
+      !UUID.test(head.askId) ||
+      typeof head.askerPubkey !== "string" ||
+      !ID.test(head.askerPubkey) ||
+      !["open", "resolved", "cancelled"].includes(String(head.status)) ||
+      oneTag(event.tags, "d") !== `channel:${channelId}:ask:${head.askId}` ||
+      !ask ||
+      ask.type !== "approval" ||
+      ask.category !== "general" ||
+      ask.askId !== head.askId ||
+      typeof ask.threadRootEventId !== "string" ||
+      !ID.test(ask.threadRootEventId) ||
+      !proposal ||
+      typeof proposal.summary !== "string" ||
+      !proposal.summary.trim() ||
+      proposal.summary.length > 600 ||
+      !profile ||
+      profile.schemaVersion !== 1 ||
+      typeof profile.name !== "string" ||
+      !profile.name.trim() ||
+      typeof profile.timeZone !== "string" ||
+      !profile.timeZone
+    )
+      throw new CompanyError("invalid_response");
+    try {
+      new Intl.DateTimeFormat("en", { timeZone: profile.timeZone });
+    } catch {
+      throw new CompanyError("invalid_response");
+    }
+    const status = head.status as ProfileProposalHead["status"];
+    if (
+      (status === "resolved" &&
+        (!resolution ||
+          typeof resolution.resolvedByPubkey !== "string" ||
+          !ID.test(resolution.resolvedByPubkey))) ||
+      (status !== "resolved" && resolution)
+    )
+      throw new CompanyError("invalid_response");
+    return {
+      eventId: event.id,
+      askId: head.askId,
+      channelId,
+      threadRootId: ask.threadRootEventId,
+      askerPubkey: head.askerPubkey,
+      status,
+      summary: proposal.summary,
+      profile: profile as BusinessProfile,
+      resolvedByPubkey:
+        typeof resolution?.resolvedByPubkey === "string"
+          ? resolution.resolvedByPubkey
+          : null,
+      outcome:
+        resolution?.outcome === "approved" || resolution?.outcome === "rejected"
+          ? resolution.outcome
+          : null,
+    };
+  }
+
+  async function proposalHeads(
+    company: Company,
+    config: ProvisioningConfig,
+    channelId: string,
+  ): Promise<ProfileProposalHead[]> {
+    if (!UUID.test(channelId)) throw new CompanyError("invalid_response");
+    const self = await relaySelf(company, config);
+    const events = await request(
+      companyBase(company, config),
+      "/query",
+      "POST",
+      JSON.stringify([
+        {
+          kinds: [ASK_HEAD_KIND],
+          authors: [self],
+          "#h": [channelId],
+          limit: 100,
+        },
+      ]),
+      true,
+    );
+    if (!Array.isArray(events) || events.length >= 100)
+      throw new CompanyError("invalid_response");
+    return events
+      .map((event) => parseProposalHead(event, self, channelId))
+      .filter((head): head is ProfileProposalHead => head !== null);
+  }
+
   async function personProfileHead(
     company: Company,
     config: ProvisioningConfig,
@@ -501,6 +717,73 @@ export function createCompanyClient(
     ): Promise<BusinessProfile | null> {
       return (await profileHead(company, config))?.profile ?? null;
     },
+    async currentProfile(
+      company: Company,
+      config: ProvisioningConfig,
+    ): Promise<{ profile: BusinessProfile; revision: number } | null> {
+      return profileHead(company, config);
+    },
+    proposalHeads,
+    async resolveProfileProposal(
+      company: Company,
+      config: ProvisioningConfig,
+      head: ProfileProposalHead,
+      outcome: "approved" | "rejected",
+    ): Promise<ProfileProposalHead> {
+      if (
+        head.status !== "open" ||
+        !UUID.test(head.channelId) ||
+        !UUID.test(head.askId) ||
+        !ID.test(head.eventId)
+      )
+        throw new CompanyError("invalid_response");
+      const response = {
+        schemaVersion: 1,
+        askId: head.askId,
+        expectedHeadEventId: head.eventId,
+        outcome,
+        reason:
+          outcome === "approved"
+            ? "The owner confirmed the business profile."
+            : "The owner requested changes in the conversation.",
+      };
+      const event = await signEvent({
+        kind: ASK_RESPONSE_KIND,
+        content: JSON.stringify(response),
+        tags: [
+          ["h", head.channelId],
+          ["d", `channel:${head.channelId}:ask:${head.askId}`],
+        ],
+      });
+      if (event.pubkey !== accountPubkey) throw new CompanyError("not_allowed");
+      let writeError: unknown = null;
+      try {
+        const result = object(
+          await request(
+            companyBase(company, config),
+            "/events",
+            "POST",
+            JSON.stringify(event),
+            true,
+          ),
+        );
+        if (result?.accepted !== true || result.event_id !== event.id)
+          throw new CompanyError("save_failed");
+      } catch (error) {
+        writeError = error;
+      }
+      const updated = (
+        await proposalHeads(company, config, head.channelId)
+      ).find((candidate) => candidate.askId === head.askId);
+      if (
+        updated?.status === "resolved" &&
+        updated.resolvedByPubkey === accountPubkey &&
+        updated.outcome === outcome
+      )
+        return updated;
+      if (writeError) throw writeError;
+      throw new CompanyError("save_failed");
+    },
     async ensurePersonName(
       company: Company,
       config: ProvisioningConfig,
@@ -583,6 +866,53 @@ export function createCompanyClient(
       if (!saved || !profileMatches(saved.profile, profile))
         throw new CompanyError("save_failed");
       return saved.profile;
+    },
+    async replaceProfile(
+      company: Company,
+      config: ProvisioningConfig,
+      profile: BusinessProfile,
+      expectedRevision: number,
+    ): Promise<{ profile: BusinessProfile; revision: number }> {
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)
+        throw new CompanyError("invalid_response");
+      const before = await profileHead(company, config);
+      if (!before || before.revision !== expectedRevision)
+        throw new CompanyError("conflict");
+      if (sameFullProfile(before.profile, profile)) return before;
+      const event = await signEvent({
+        kind: PROFILE_ACTION_KIND,
+        content: JSON.stringify({ profile, expectedRevision }),
+        tags: [["d", PROFILE_D]],
+      });
+      if (event.pubkey !== accountPubkey) throw new CompanyError("not_allowed");
+      try {
+        const result = object(
+          await request(
+            companyBase(company, config),
+            "/events",
+            "POST",
+            JSON.stringify(event),
+            true,
+          ),
+        );
+        if (result?.accepted !== true || result.event_id !== event.id)
+          throw new CompanyError("save_failed");
+      } catch (error) {
+        const recovered = await profileHead(company, config).catch(() => null);
+        if (
+          recovered?.revision === expectedRevision + 1 &&
+          sameFullProfile(recovered.profile, profile)
+        )
+          return recovered;
+        throw error;
+      }
+      const saved = await profileHead(company, config);
+      if (
+        saved?.revision !== expectedRevision + 1 ||
+        !sameFullProfile(saved.profile, profile)
+      )
+        throw new CompanyError("save_failed");
+      return saved;
     },
   };
 }

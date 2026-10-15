@@ -422,6 +422,18 @@ fn fizz_builtin_resolves_to_buzz_agent() {
 
 #[test]
 fn stock_scout_prompt_migrates_and_custom_instructions_survive() {
+    assert!(super::is_stock_scout_prompt(super::SCOUT_V1_SYSTEM_PROMPT));
+    let mut previous_stock = custom_persona("builtin:fizz", "Scout");
+    previous_stock.system_prompt = super::SCOUT_V1_SYSTEM_PROMPT.to_string();
+    let (previous_records, _) = merge_personas(vec![previous_stock], "2026-10-15T00:00:00Z");
+    assert_eq!(
+        previous_records
+            .iter()
+            .find(|record| record.id == "builtin:fizz")
+            .expect("previous Scout definition")
+            .system_prompt,
+        super::SCOUT_SYSTEM_PROMPT.trim()
+    );
     let mut stock = custom_persona("builtin:fizz", "Fizz");
     stock.system_prompt = super::SCOUT_LEGACY_SYSTEM_PROMPT.to_string();
     stock.name_pool = vec!["Fizz".to_string()];

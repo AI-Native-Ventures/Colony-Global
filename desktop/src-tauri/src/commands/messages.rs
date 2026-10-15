@@ -1,7 +1,11 @@
-use nostr::{Event, EventId, Keys, PublicKey};
+use nostr::{Event, EventId, Keys, PublicKey, Tag};
+use std::sync::LazyLock;
 use tauri::{AppHandle, State};
 
 mod forum;
+
+static SCOUT_KICKOFF_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 use forum::{
     apply_link_preview_suppression, fetch_agent_owner_pubkeys, link_preview_suppression_targets,
@@ -418,6 +422,8 @@ pub async fn send_channel_message(
     link_preview_tags: Option<Vec<Vec<String>>>,
     sent_from_thread_tag: Option<Vec<String>>,
     mention_pubkeys: Option<Vec<String>>,
+    setup_first_turn: Option<bool>,
+    setup_marker: Option<String>,
     kind: Option<u32>,
     expected_relay_url: Option<String>,
     expected_signer_pubkey: Option<String>,
@@ -426,6 +432,28 @@ pub async fn send_channel_message(
     let channel_uuid = uuid::Uuid::parse_str(&channel_id)
         .map_err(|_| format!("invalid channel UUID: {channel_id}"))?;
     let mentions = mention_pubkeys.unwrap_or_default();
+    let setup_marker = if setup_first_turn == Some(true) {
+        let marker = setup_marker
+            .as_deref()
+            .ok_or("Scout kickoff marker is required")?;
+        let company_id = marker
+            .strip_prefix("colony-global-scout-first-turn:")
+            .ok_or("invalid Scout kickoff marker")?;
+        uuid::Uuid::parse_str(company_id).map_err(|_| "invalid Scout company UUID")?;
+        if parent_event_id.is_some()
+            || root_event_id.is_some()
+            || kind.is_some_and(|value| value != buzz_core_pkg::kind::KIND_STREAM_MESSAGE)
+            || mentions.len() != 1
+        {
+            return Err("Scout kickoff must be a top-level stream message with one mention".into());
+        }
+        Some(marker.to_string())
+    } else {
+        if setup_marker.is_some() {
+            return Err("Scout kickoff marker requires setup_first_turn".into());
+        }
+        None
+    };
     let mention_refs: Vec<&str> = mentions.iter().map(|s| s.as_str()).collect();
     let media = media_tags.unwrap_or_default();
     let emoji = emoji_tags.unwrap_or_default();
@@ -444,10 +472,67 @@ pub async fn send_channel_message(
     let relay_base = crate::relay::relay_api_base_url_with_override(&state);
     assert_expected_relay_scope(expected_relay_url.as_deref(), &relay_base)?;
     let signing_keys = state.signing_keys()?;
-    assert_expected_signer(
-        expected_signer_pubkey.as_deref(),
-        &signing_keys.public_key().to_hex(),
-    )?;
+    let signing_pubkey = signing_keys.public_key().to_hex();
+    assert_expected_signer(expected_signer_pubkey.as_deref(), &signing_pubkey)?;
+    let _setup_guard = if setup_marker.is_some() {
+        Some(SCOUT_KICKOFF_LOCK.lock().await)
+    } else {
+        None
+    };
+    if let Some(marker) = setup_marker.as_deref() {
+        if let Some(existing) = find_managed_agent_channel_message_by_marker(
+            &state,
+            Some(&signing_pubkey),
+            &channel_id,
+            marker,
+        )
+        .await?
+        {
+            let has_setup = existing.tags.iter().any(|tag| {
+                let parts = tag.as_slice();
+                parts.len() == 2 && parts[0] == "colony:setup" && parts[1] == "first-turn"
+            });
+            let has_channel = existing.tags.iter().any(|tag| {
+                let parts = tag.as_slice();
+                parts.len() >= 2 && parts[0] == "h" && parts[1] == channel_id
+            });
+            let has_mention = existing.tags.iter().any(|tag| {
+                let parts = tag.as_slice();
+                parts.len() >= 2 && parts[0] == "p" && parts[1] == mentions[0]
+            });
+            if existing.verify().is_err()
+                || existing.pubkey.to_hex() != signing_pubkey
+                || !has_channel
+                || !has_setup
+                || !has_mention
+            {
+                return Err("Scout kickoff marker is already used by a different message".into());
+            }
+            assert_expected_relay_scope(
+                expected_relay_url.as_deref(),
+                &crate::relay::relay_api_base_url_with_override(&state),
+            )?;
+            assert_expected_signer(
+                expected_signer_pubkey.as_deref(),
+                &state.signing_keys()?.public_key().to_hex(),
+            )?;
+            return Ok(SendChannelMessageResponse {
+                event_id: existing.id.to_hex(),
+                parent_event_id: None,
+                root_event_id: None,
+                depth: 0,
+                created_at: existing.created_at.as_secs() as i64,
+            });
+        }
+        assert_expected_relay_scope(
+            expected_relay_url.as_deref(),
+            &crate::relay::relay_api_base_url_with_override(&state),
+        )?;
+        assert_expected_signer(
+            expected_signer_pubkey.as_deref(),
+            &state.signing_keys()?.public_key().to_hex(),
+        )?;
+    }
     let kind_num = kind.unwrap_or(buzz_core_pkg::kind::KIND_STREAM_MESSAGE);
     if sent_from_thread_tag.is_some() && kind_num != buzz_core_pkg::kind::KIND_STREAM_MESSAGE {
         return Err("sent-from-thread provenance requires a stream message".into());
@@ -517,6 +602,13 @@ pub async fn send_channel_message(
                 &relay_base,
             )?
         }
+    };
+    let builder = if let Some(marker) = setup_marker.as_deref() {
+        builder
+            .tag(Tag::parse(vec!["colony:setup", "first-turn"]).map_err(|e| e.to_string())?)
+            .tag(Tag::parse(vec!["client", marker]).map_err(|e| e.to_string())?)
+    } else {
+        builder
     };
 
     // `created_at` is the signed event's own second, not a post-publication

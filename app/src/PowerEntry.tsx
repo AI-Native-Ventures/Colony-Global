@@ -757,8 +757,8 @@ export function PowerEntry({
                   {money(snapshot?.balanceUsdCents ?? 0)}.
                 </output>
                 <p className="first-run-lede">
-                  Scout's first setup is still being connected to your team.
-                  Your credits will be here when that step is ready.
+                  Your credits are ready. Open Today to start Scout's first
+                  conversation.
                 </p>
                 <button
                   type="button"
