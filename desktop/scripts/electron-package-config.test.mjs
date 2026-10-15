@@ -16,6 +16,20 @@ import {
   verifySignatureArguments,
 } from "./electron-package-config.mjs";
 
+test("the shipped host, bundle, and URL handler use Colony Global identity", () => {
+  const desktopDirectory = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+  );
+  const config = JSON.parse(
+    readFileSync(path.join(desktopDirectory, "src-tauri", "tauri.conf.json"), "utf8"),
+  );
+  assert.equal(config.productName, "Colony Global");
+  assert.equal(config.identifier, "global.colony.desktop");
+  assert.equal(ELECTRON_BUNDLE_ID, `${config.identifier}.electron`);
+  assert.deepEqual(config.plugins["deep-link"].desktop.schemes, []);
+});
+
 test("Vite exposes the public Google client ID without exposing its secret", async () => {
   const desktopDirectory = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -140,11 +154,11 @@ test("each platform gets the requested output directory and archive format", () 
   assert.equal(nativeHostFilename("win32"), "colony-native-host.exe");
 });
 
-test("packager config keeps Buzz identity and places runtime files in asar", () => {
+test("packager config uses the isolated Colony Global identity", () => {
   const options = createPackagerOptions({
     dir: "/tmp/staged-app",
     out: "/checkout/desktop/dist-electron",
-    productName: "Buzz",
+    productName: "Colony Global",
     appVersion: "0.5.23",
     electronVersion: "44.4.3",
     platform: "darwin",
@@ -152,9 +166,10 @@ test("packager config keeps Buzz identity and places runtime files in asar", () 
     extraResource: ["/tmp/staged-app/colony-native-host"],
   });
 
-  assert.equal(options.name, "Buzz");
-  assert.equal(options.executableName, "Buzz");
+  assert.equal(options.name, "Colony Global");
+  assert.equal(options.executableName, "Colony Global");
   assert.equal(options.appBundleId, ELECTRON_BUNDLE_ID);
+  assert.equal(options.appBundleId, "global.colony.desktop.electron");
   assert.equal(options.asar, true);
   assert.equal(options.platform, "darwin");
   assert.equal(options.arch, "arm64");

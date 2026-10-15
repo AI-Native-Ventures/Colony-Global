@@ -1,6 +1,6 @@
 import path from "node:path";
 
-export const ELECTRON_BUNDLE_ID = "xyz.block.buzz.app.electron";
+export const ELECTRON_BUNDLE_ID = "global.colony.desktop.electron";
 
 const SUPPORTED_PLATFORMS = new Set(["darwin", "win32", "linux"]);
 const SUPPORTED_ARCHITECTURES = new Set(["arm64", "x64"]);

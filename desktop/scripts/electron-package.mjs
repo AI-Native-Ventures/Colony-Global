@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   APP_ICON_BASENAME,
+  ELECTRON_BUNDLE_ID,
   adhocSignArguments,
   createPackagerOptions,
   electronPackagePaths,
@@ -149,6 +150,17 @@ async function verifyMacBundle(appBundlePath) {
     );
   });
   const infoPlist = path.join(appBundlePath, "Contents", "Info.plist");
+  const { stdout: bundleId } = await exec("plutil", [
+    "-extract",
+    "CFBundleIdentifier",
+    "raw",
+    "-o",
+    "-",
+    infoPlist,
+  ]);
+  if (bundleId.trim() !== ELECTRON_BUNDLE_ID) {
+    throw new Error(`Unexpected Colony Global bundle ID: ${bundleId.trim()}`);
+  }
   const { stdout } = await exec("plutil", [
     "-extract",
     "CFBundleIconFile",
@@ -280,7 +292,7 @@ try {
   if (process.env.COLONY_ELECTRON_RELEASE === "1") {
     const updateConfig = [
       "provider: generic",
-      'url: "https://github.com/AI-Native-Ventures/colony-ai/releases/latest/download/"',
+      'url: "https://github.com/AI-Native-Ventures/Colony-Global/releases/latest/download/"',
       ...(releaseCapabilities.publisherName
         ? [
             "publisherName:",
@@ -400,6 +412,10 @@ try {
   const stagedTauriConfig = await readFile(stagedTauriConfigPath);
   if (!packagedTauriConfig.equals(stagedTauriConfig))
     throw new Error("Packaged app is missing the staged Tauri configuration.");
+  const packagedRenderer = extractFile(appAsarPath, "dist/index.html");
+  const builtRenderer = await readFile(path.join(distPath, "index.html"));
+  if (!packagedRenderer.equals(builtRenderer))
+    throw new Error("Packaged app does not contain the built Colony Global renderer.");
 
   const packagedRuntimePaths = [
     path.join(appResourcesPath, hostFilename),

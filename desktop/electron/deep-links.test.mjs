@@ -12,7 +12,8 @@ const desktopRoot = new URL("../", import.meta.url);
 const config = JSON.parse(
   await readFile(new URL("src-tauri/tauri.conf.json", desktopRoot), "utf8"),
 );
-const schemes = deepLinkSchemesFromConfig(config);
+const canarySchemes = deepLinkSchemesFromConfig(config);
+const schemes = ["colony", "buzz"];
 
 function fakeHost() {
   const calls = [];
@@ -22,9 +23,13 @@ function fakeHost() {
   };
 }
 
-test("reads and validates the app URL schemes from the Tauri config", () => {
-  // colony:// is what the web invite page mints; buzz:// stays for old links.
-  assert.deepEqual(schemes, ["colony", "buzz"]);
+test("the canary cannot take OS links from existing Colony or Buzz installs", () => {
+  assert.deepEqual(canarySchemes, []);
+  assert.equal(isDeepLinkUrl("colony://join?code=abc", canarySchemes), false);
+  assert.equal(isDeepLinkUrl("buzz://message?id=abc", canarySchemes), false);
+});
+
+test("validates supported deep-link schemes without trusting app content URLs", () => {
   assert.deepEqual(
     deepLinkSchemesFromConfig({
       plugins: {
@@ -57,6 +62,8 @@ test("registers URL schemes for packaged and development Electron apps", () => {
     },
   };
 
+  assert.deepEqual(registerDeepLinkSchemes(app, canarySchemes), []);
+  assert.deepEqual(calls, []);
   assert.deepEqual(registerDeepLinkSchemes(app, schemes), [true, true]);
   assert.deepEqual(
     registerDeepLinkSchemes(app, schemes, {

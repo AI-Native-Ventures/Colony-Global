@@ -131,6 +131,52 @@ jobs:
       - name: Compile native host
         run: cargo check --manifest-path desktop/src-tauri/Cargo.toml --bin colony-native-host --features electron-host --locked
 
+  canary_package:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/colony-global-canary-package'
+    name: Installed canary package
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - name: Checked commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA" && echo "$GITHUB_SHA"
+      - name: Install locked renderer and packager dependencies
+        run: |
+          npm ci --prefix app
+          pnpm --filter buzz install --frozen-lockfile
+      - name: Check package identity and build the new renderer
+        run: |
+          node --test desktop/scripts/electron-package-config.test.mjs desktop/scripts/electron-renderer-source.test.mjs
+          npm run build --prefix app
+      - name: Build required agent and CLI sidecars
+        run: cargo build --release --locked --bins -p buzz-acp -p buzz-agent -p buzz-backend-kubernetes -p buzz-dev-mcp -p git-credential-nostr -p buzz-cli
+      - name: Stage real sidecars for native compilation
+        run: |
+          release_dir=$(cargo metadata --format-version 1 --no-deps | node -e 'let text="";process.stdin.on("data",chunk=>text+=chunk);process.stdin.on("end",()=>console.log(JSON.parse(text).target_directory+"/release"))')
+          target=$(rustc -vV | sed -n 's/^host: //p')
+          test -n "$target"
+          mkdir -p desktop/src-tauri/binaries
+          for binary in buzz-acp buzz-agent buzz-backend-kubernetes buzz-dev-mcp git-credential-nostr buzz; do
+            file "$release_dir/$binary" | grep -q 'Mach-O 64-bit'
+            cp "$release_dir/$binary" "desktop/src-tauri/binaries/${binary}-${target}"
+          done
+      - name: Build the native host
+        env:
+          COLONY_CREDITS_GATEWAY: "1"
+        run: cargo build --manifest-path desktop/src-tauri/Cargo.toml --release --bin colony-native-host --features electron-host --locked
+      - name: Package and verify the installed app
+        run: |
+          arch=$(node -p 'process.arch')
+          node desktop/scripts/electron-package.mjs --platform=darwin --arch="$arch"
+      - name: Attach unsigned canary archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: colony-global-macos-canary-${{ github.sha }}
+          path: desktop/dist-electron/darwin-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
   security:
     name: Dependency and source hygiene
     runs-on: ubuntu-latest
