@@ -402,6 +402,7 @@ async fn company_duty_ask_requires_owner_or_admin_and_creates_the_versioned_work
         hire_proposal: None,
         duty_proposal: Some(proposal.clone()),
         spend_allowance_proposal: None,
+        profile_proposal: None,
     };
     let action = AskAction {
         schema_version: COMPANY_RECORD_SCHEMA_VERSION,

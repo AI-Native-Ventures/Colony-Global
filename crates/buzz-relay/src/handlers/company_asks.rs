@@ -169,6 +169,11 @@ async fn handle_ask_action(
                 )
                 .await?;
             }
+            if ask.profile_proposal.is_some() && !actor.is_community_member && !actor.is_agent {
+                return Err(forbidden(
+                    "only a company member or managed employee can propose the business profile",
+                ));
+            }
 
             let thread_meta = if ask.thread_start.is_some() {
                 let thread_meta = new_ask_thread_metadata(&event, channel_id)?;
@@ -1263,6 +1268,12 @@ pub(super) fn relay_ask_head_event(
                 .map_err(|error| internal(format!("tool consent inbox tag: {error}")))?,
         );
     }
+    if head.ask.profile_proposal.is_some() {
+        tags.push(
+            Tag::parse(buzz_core::profile_proposal::PROFILE_PROPOSAL_TAG)
+                .map_err(|error| internal(format!("profile proposal inbox tag: {error}")))?,
+        );
+    }
     EventBuilder::new(Kind::Custom(KIND_ASK_HEAD as u16), content)
         .tags(tags)
         .custom_created_at(nostr::Timestamp::from_secs(created_at))
@@ -1656,6 +1667,7 @@ mod postgres_tests {
             hire_proposal: None,
             duty_proposal: None,
             spend_allowance_proposal: None,
+            profile_proposal: None,
         }
     }
 
@@ -2924,5 +2936,78 @@ mod postgres_tests {
             duplicate_result,
             Err(IngestError::Rejected(message)) if message.contains("already revoked")
         ));
+    }
+    #[tokio::test]
+    #[ignore = "requires disposable Postgres and Redis"]
+    async fn profile_proposal_head_is_tagged_and_only_owner_or_admin_can_approve() {
+        let fixture = fixture().await;
+        let scout = Keys::generate();
+        add_actor(&fixture, &scout, None, true, true).await;
+        let member = Keys::generate();
+        add_actor(&fixture, &member, Some("member"), false, true).await;
+        let admin = Keys::generate();
+        add_actor(&fixture, &admin, Some("admin"), false, true).await;
+
+        let mut ask = ask_record(
+            Uuid::new_v4(),
+            &fixture.root.id.to_hex(),
+            AskType::Approval,
+            AskCategory::General,
+        );
+        ask.title = "Your business profile".into();
+        ask.profile_proposal = Some(buzz_core::profile_proposal::ProfileProposal {
+            summary: "I added what you sell from your website.".into(),
+            profile: serde_json::from_value(serde_json::json!({
+                "schemaVersion": 1,
+                "name": "Lerato Designs",
+                "timeZone": "Africa/Johannesburg"
+            }))
+            .expect("valid proposal profile"),
+        });
+        let (_, head_event) = create_ask(&fixture, &scout, ask).await;
+        assert!(head_event
+            .event
+            .tags
+            .iter()
+            .any(|tag| { tag.as_slice() == buzz_core::profile_proposal::PROFILE_PROPOSAL_TAG }));
+        let head = parse_head(&head_event.event).expect("parse proposal ask");
+        let answer = response(
+            head.ask_id,
+            &head_event.event.id.to_hex(),
+            AskType::Approval,
+        );
+        for disallowed in [&member, &scout] {
+            let denied = company_records::handle(
+                &fixture.tenant,
+                &fixture.state,
+                sign_response(disallowed, fixture.channel_id, &answer),
+                auth(disallowed),
+            )
+            .await;
+            assert!(matches!(denied, Err(IngestError::AuthFailed(_))));
+        }
+        company_records::handle(
+            &fixture.tenant,
+            &fixture.state,
+            sign_response(&admin, fixture.channel_id, &answer),
+            auth(&admin),
+        )
+        .await
+        .expect("admin approves proposal");
+        let d_tag = buzz_core::company_records::ask_d_tag(fixture.channel_id, head.ask_id);
+        let resolved =
+            current_ask_head(&fixture.state, &fixture.tenant, fixture.channel_id, &d_tag)
+                .await
+                .expect("load ask")
+                .expect("resolved ask head");
+        assert_eq!(
+            parse_head(&resolved.event).expect("parse ask").status,
+            AskStatus::Resolved
+        );
+        assert!(resolved
+            .event
+            .tags
+            .iter()
+            .any(|tag| { tag.as_slice() == buzz_core::profile_proposal::PROFILE_PROPOSAL_TAG }));
     }
 }

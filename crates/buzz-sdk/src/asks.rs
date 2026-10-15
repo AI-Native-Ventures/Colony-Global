@@ -114,6 +114,7 @@ mod tests {
             hire_proposal: None,
             duty_proposal: None,
             spend_allowance_proposal: None,
+            profile_proposal: None,
         }
     }
 

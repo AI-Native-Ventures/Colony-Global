@@ -619,6 +619,7 @@ async fn money_ask_approval_atomically_commits_allowance_for_an_authorized_human
         hire_proposal: None,
         duty_proposal: None,
         spend_allowance_proposal: Some(proposal),
+        profile_proposal: None,
     };
     let create_action = AskAction {
         schema_version: COMPANY_RECORD_SCHEMA_VERSION,
