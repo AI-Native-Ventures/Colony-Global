@@ -21,8 +21,18 @@ export function checkColonyGlobalSource(root) {
   const workflows = filesUnder(path.join(root, ".github", "workflows"))
     .map((filename) => path.relative(path.join(root, ".github", "workflows"), filename))
     .sort();
-  if (JSON.stringify(workflows) !== JSON.stringify(["ci.yml"])) {
-    errors.push(`Expected only ci.yml under .github/workflows; found ${workflows.join(", ") || "none"}`);
+  if (JSON.stringify(workflows) !== JSON.stringify(["ci.yml", "deploy-production.yml"])) {
+    errors.push(`Expected only ci.yml and deploy-production.yml under .github/workflows; found ${workflows.join(", ") || "none"}`);
+  }
+  const deployWorkflow = path.join(root, ".github", "workflows", "deploy-production.yml");
+  if (fs.existsSync(deployWorkflow)) {
+    const deploySource = fs.readFileSync(deployWorkflow, "utf8");
+    const eventSection = /^on:\n((?:[ \t].*\n|\n)*)/mu.exec(deploySource)?.[1] ?? "";
+    const events = [...eventSection.matchAll(/^  ([A-Za-z_][\w-]*):/gmu)]
+      .map((match) => match[1]);
+    if (JSON.stringify(events) !== JSON.stringify(["workflow_dispatch"])) {
+      errors.push("Production deployment must be workflow_dispatch only");
+    }
   }
 
   const license = path.join(root, "LICENSE");
