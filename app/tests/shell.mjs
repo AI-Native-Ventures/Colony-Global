@@ -21,6 +21,48 @@ const defaultCompany = {
   owner_pubkey: accountPubkey,
   role: "owner",
 };
+const sampleChannelId = "33333333-3333-4333-8333-333333333333";
+
+function sampleChannel(name = "Spring launch") {
+  return {
+    id: sampleChannelId,
+    name,
+    channel_type: "stream",
+    visibility: "private",
+    description: "",
+    member_count: 1,
+    member_pubkeys: [accountPubkey],
+    last_message_at: null,
+    archived_at: null,
+    participants: [],
+    participant_pubkeys: [],
+    is_member: true,
+    ttl_seconds: null,
+    ttl_deadline: null,
+  };
+}
+
+function channelMessage(content, options = {}) {
+  return finalizeEvent(
+    {
+      kind: 9,
+      created_at: Math.floor(Date.now() / 1_000) + (options.offset ?? 0),
+      tags: [
+        ["h", options.channelId ?? sampleChannelId],
+        ...(options.rootId
+          ? options.parentId && options.parentId !== options.rootId
+            ? [
+                ["e", options.rootId, "", "root"],
+                ["e", options.parentId, "", "reply"],
+              ]
+            : [["e", options.rootId, "", "reply"]]
+          : []),
+      ],
+      content,
+    },
+    accountSecret,
+  );
+}
 
 function profileEvent(profile, revision = 1) {
   return finalizeEvent(
@@ -84,6 +126,13 @@ async function installMock(page, options = {}) {
       accountSecret,
     ),
   );
+  await page.exposeFunction("__COLONY_SIGN_CHANNEL_MESSAGE__", (input) =>
+    channelMessage(input.content, {
+      channelId: input.channelId,
+      rootId: input.rootId,
+      offset: input.offset,
+    }),
+  );
   await page.addInitScript(
     (settings) => {
       const key = settings.accountPubkey;
@@ -101,6 +150,16 @@ async function installMock(page, options = {}) {
         commands: [],
         requests: [],
         account: persisted?.account ?? settings.initialAccount,
+        activeRelay: persisted?.activeRelay ?? "ws://127.0.0.1:3000",
+        workspaceFailures: persisted?.workspaceFailures ?? [
+          ...settings.workspaceFailures,
+        ],
+        channels: persisted?.channels ?? structuredClone(settings.channels),
+        events: persisted?.events ?? structuredClone(settings.events),
+        members: structuredClone(settings.members),
+        sendFailures: [...settings.sendFailures],
+        scopeSwitchOnRead: settings.scopeSwitchOnRead,
+        nextMessageOffset: persisted?.nextMessageOffset ?? 1,
         policy: settings.policy,
         hostFailures: settings.hostFailures,
         policyFailures: settings.policyFailures,
@@ -133,6 +192,11 @@ async function installMock(page, options = {}) {
           "__mock_relay_company",
           JSON.stringify({
             account: state.account,
+            activeRelay: state.activeRelay,
+            workspaceFailures: state.workspaceFailures,
+            channels: state.channels,
+            events: state.events,
+            nextMessageOffset: state.nextMessageOffset,
             companies: state.companies,
             profileEvent: state.profileEvent,
             personEvent: state.personEvent,
@@ -150,10 +214,98 @@ async function installMock(page, options = {}) {
             case "get_default_relay_url":
               if (state.hostFailures-- > 0) throw new Error("Host restarting");
               return "ws://127.0.0.1:3000";
+            case "get_default_relay_http_url":
+              return settings.httpUrl;
             case "get_relay_ws_url":
-              return "ws://127.0.0.1:3000";
+              return state.activeRelay;
             case "get_relay_http_url":
               return settings.httpUrl;
+            case "apply_workspace": {
+              const failure = state.workspaceFailures.shift();
+              if (failure) throw new Error(failure);
+              state.activeRelay = payload.args.relayUrl;
+              persistCompany();
+              return null;
+            }
+            case "get_active_workspace":
+              return { relay_url: state.activeRelay, pubkey: key };
+            case "get_channels":
+              if (state.scopeSwitchOnRead === "get_channels")
+                state.activeRelay = "wss://another-shop.colony.example.test";
+              return {
+                hash: "mock",
+                channels: state.channels,
+                last_messages: {},
+              };
+            case "get_channel_members":
+              return { members: state.members, next_cursor: null };
+            case "get_channel_window":
+              return state.events.filter(
+                (event) =>
+                  event.tags.some(
+                    (tag) =>
+                      tag[0] === "h" && tag[1] === payload.args.channelId,
+                  ) &&
+                  !event.tags.some(
+                    (tag) => tag[0] === "e" && tag[3] === "root",
+                  ),
+              );
+            case "get_thread_replies":
+              return {
+                events: state.events.filter(
+                  (event) =>
+                    event.tags.some(
+                      (tag) =>
+                        tag[0] === "h" && tag[1] === payload.args.channelId,
+                    ) &&
+                    event.tags.some(
+                      (tag) =>
+                        tag[0] === "e" &&
+                        tag[1] === payload.args.rootEventId &&
+                        ["root", "reply"].includes(tag[3]),
+                    ),
+                ),
+                next_cursor: null,
+              };
+            case "send_channel_message": {
+              if (
+                payload.args.expectedRelayUrl !== state.activeRelay ||
+                payload.args.expectedSignerPubkey !== key
+              )
+                throw new Error("active community changed");
+              const failure = state.sendFailures.shift();
+              if (failure) throw new Error(failure);
+              const event = await window.__COLONY_SIGN_CHANNEL_MESSAGE__({
+                channelId: payload.args.channelId,
+                content: payload.args.content,
+                rootId: payload.args.rootEventId,
+                offset: state.nextMessageOffset++,
+              });
+              state.events.push(event);
+              persistCompany();
+              return {
+                event_id: event.id,
+                parent_event_id: payload.args.parentEventId,
+                root_event_id: payload.args.rootEventId,
+                depth: payload.args.rootEventId ? 1 : 0,
+                created_at: event.created_at,
+              };
+            }
+            case "create_channel": {
+              if (
+                payload.args.expectedRelayUrl !== state.activeRelay ||
+                payload.args.expectedSignerPubkey !== key
+              )
+                throw new Error("active community changed");
+              const channel = {
+                ...settings.sampleChannel,
+                id: crypto.randomUUID(),
+                name: payload.args.name,
+              };
+              state.channels.push(channel);
+              persistCompany();
+              return channel;
+            }
             case "colony_credits_gateway_enabled":
               return settings.creditsEnabled;
             case "plugin:opener|open_url":
@@ -437,6 +589,20 @@ async function installMock(page, options = {}) {
           : options.profileEvent,
       personEvent: options.personEvent ?? null,
       relaySelf,
+      workspaceFailures: options.workspaceFailures ?? [],
+      channels: options.channels ?? [],
+      events: options.events ?? [],
+      members: options.members ?? [
+        {
+          pubkey: accountPubkey,
+          role: "member",
+          is_agent: false,
+          display_name: "Lerato",
+        },
+      ],
+      sendFailures: options.sendFailures ?? [],
+      scopeSwitchOnRead: options.scopeSwitchOnRead,
+      sampleChannel: sampleChannel(),
       companyFailures: options.companyFailures ?? [],
       profileSaveFailures: options.profileSaveFailures ?? [],
       personSaveFailures: options.personSaveFailures ?? [],
@@ -536,10 +702,8 @@ test("returning account restores via signed lookup into the ant workroom", async
   await page.getByRole("heading", { name: "Today" }).waitFor();
   await page.getByRole("button", { name: "Conversations" }).focus();
   await page.keyboard.press("Enter");
-  await page
-    .getByRole("heading", { name: "Conversations", exact: true })
-    .waitFor();
-  assert.match(await page.locator("main").innerText(), /being rebuilt/u);
+  await page.getByRole("heading", { name: "Conversations." }).waitFor();
+  await page.getByRole("heading", { name: "No conversations yet" }).waitFor();
   await page.setViewportSize({ width: 1024, height: 700 });
   assert.equal(
     await page.evaluate(() => document.documentElement.scrollWidth <= 1024),
@@ -1566,5 +1730,160 @@ test("a tampered business profile cannot open the company", async () => {
     .waitFor();
   assert.equal(await page.getByRole("heading", { name: "Today" }).count(), 0);
   assert.equal(await page.getByText("Fake company").count(), 0);
+  await page.close();
+});
+
+test("company conversations use relay channels, messages, and a side thread", async () => {
+  const root = channelMessage("Let's plan the spring collection");
+  const earlierReply = channelMessage("I can prepare the notes", {
+    rootId: root.id,
+    offset: 1,
+  });
+  const deeperReply = channelMessage("Let's compare dates", {
+    rootId: root.id,
+    parentId: earlierReply.id,
+    offset: 2,
+  });
+  const page = await tracedPage("conversation-thread");
+  await installMock(page, {
+    initialAccount: true,
+    channels: [sampleChannel()],
+    events: [root, earlierReply, deeperReply],
+  });
+  await page.goto(url);
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("button", { name: "Conversations" }).click();
+  await page.getByRole("heading", { name: "Conversations." }).waitFor();
+  await page.getByRole("button", { name: /Spring launch/u }).click();
+  await page.getByText("Let's plan the spring collection").waitFor();
+  assert.equal(await page.getByText("I can prepare the notes").count(), 0);
+  await page.getByRole("button", { name: "Discuss in thread" }).click();
+  await page
+    .getByRole("complementary", { name: "Message thread" })
+    .getByText("I can prepare the notes")
+    .waitFor();
+  await page
+    .getByRole("complementary", { name: "Message thread" })
+    .getByText("Let's compare dates")
+    .waitFor();
+  if (process.env.COLONY_CONVERSATION_SHOT)
+    await page.screenshot({ path: process.env.COLONY_CONVERSATION_SHOT });
+  await page
+    .getByRole("textbox", { name: "Reply in thread" })
+    .fill("Let's discuss the launch date");
+  await page.getByRole("button", { name: "Send" }).last().click();
+  await page
+    .getByRole("complementary", { name: "Message thread" })
+    .getByText("Let's discuss the launch date")
+    .waitFor();
+  await page.getByRole("button", { name: "Close thread" }).click();
+  await page
+    .getByRole("textbox", { name: "Message this conversation" })
+    .fill("A fresh top-level note");
+  await page
+    .getByRole("textbox", { name: "Message this conversation" })
+    .press("Enter");
+  await page.getByText("A fresh top-level note").waitFor();
+  const commands = await page.evaluate(() => window.__COLONY_TEST__.commands);
+  for (const command of [
+    "apply_workspace",
+    "get_channels",
+    "get_channel_window",
+    "get_thread_replies",
+    "send_channel_message",
+  ])
+    assert.ok(commands.includes(command), `${command} used the native host`);
+  const active = await page.evaluate(() => window.__COLONY_TEST__.activeRelay);
+  assert.equal(active, `wss://${defaultCompany.normalized_host}`);
+  await page.close();
+});
+
+test("a failed company handoff is retryable and account discovery stays on the deployment relay", async () => {
+  const page = await tracedPage("company-workspace-retry");
+  await installMock(page, {
+    initialAccount: true,
+    workspaceFailures: ["relay temporarily offline"],
+  });
+  await page.goto(url);
+  await page
+    .getByRole("heading", { name: "Your company is unavailable" })
+    .waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Today" }).count(), 0);
+  await page.getByRole("button", { name: "Try again" }).click();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.reload();
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  const accountRequests = await page.evaluate(() =>
+    window.__COLONY_TEST__.requests.filter(
+      (entry) => entry.path === "/api/accounts/me",
+    ),
+  );
+  assert.ok(accountRequests.length >= 1);
+  assert.ok(
+    accountRequests.every((entry) =>
+      entry.target.startsWith("http://127.0.0.1:3000/"),
+    ),
+  );
+  await page.close();
+});
+
+test("unsigned conversation data fails closed and the send draft survives a host error", async () => {
+  const signed = channelMessage("A real message");
+  const tampered = { ...signed, content: "Forged message" };
+  const page = await tracedPage("conversation-invalid-event");
+  await installMock(page, {
+    initialAccount: true,
+    channels: [sampleChannel()],
+    events: [tampered],
+    sendFailures: ["relay unreachable"],
+  });
+  await page.goto(url);
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("button", { name: "Conversations" }).click();
+  await page.getByRole("button", { name: /Spring launch/u }).click();
+  await page.getByText("Colony couldn't load this conversation.").waitFor();
+  assert.equal(await page.getByText("Forged message").count(), 0);
+  const composer = page.getByRole("textbox", {
+    name: "Message this conversation",
+  });
+  await composer.fill("Please save this draft");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByText(/Couldn't confirm the send/u).waitFor();
+  assert.equal(await composer.inputValue(), "Please save this draft");
+  await page.close();
+});
+
+test("a native workspace switch during a channel read cannot expose the returned list", async () => {
+  const page = await tracedPage("conversation-scope-switch");
+  await installMock(page, {
+    initialAccount: true,
+    channels: [sampleChannel("Private spring plan")],
+    scopeSwitchOnRead: "get_channels",
+  });
+  await page.goto(url);
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("button", { name: "Conversations" }).click();
+  await page
+    .getByText("Colony couldn't load this company's conversations.")
+    .waitFor();
+  assert.equal(await page.getByText("Private spring plan").count(), 0);
+  await page.close();
+});
+
+test("a person can create a private conversation on the selected company relay", async () => {
+  const page = await tracedPage("conversation-create");
+  await installMock(page, { initialAccount: true });
+  await page.goto(url);
+  await page.getByRole("heading", { name: "Today" }).waitFor();
+  await page.getByRole("button", { name: "Conversations" }).click();
+  await page.getByRole("heading", { name: "No conversations yet" }).waitFor();
+  await page.getByRole("button", { name: "New conversation" }).click();
+  await page
+    .getByRole("textbox", { name: "What is this conversation about?" })
+    .fill("New collection");
+  await page.getByRole("button", { name: "Create conversation" }).click();
+  await page.getByRole("heading", { name: "New collection" }).waitFor();
+  const commands = await page.evaluate(() => window.__COLONY_TEST__.commands);
+  assert.ok(commands.includes("create_channel"));
   await page.close();
 });

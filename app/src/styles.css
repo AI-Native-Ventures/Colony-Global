@@ -291,6 +291,344 @@ p {
   color: var(--canvas);
   font-weight: 700;
 }
+.primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.conversations-page,
+.conversation-layout {
+  height: 100%;
+  min-height: 0;
+}
+.conversation-index {
+  width: min(100%, 900px);
+  margin: 0 auto;
+  padding: 54px clamp(24px, 5vw, 64px) 70px;
+}
+.conversation-index-heading,
+.conversation-topbar,
+.conversation-list-heading,
+.thread-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.conversation-index-heading {
+  align-items: flex-end;
+  margin-bottom: 48px;
+}
+.conversation-index-heading p,
+.conversation-topbar p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+.conversation-index-heading .primary-button,
+.new-conversation .primary-button,
+.conversation-composer .primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 0;
+}
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.conversation-list-heading {
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--line);
+}
+.conversation-list-heading h2 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.text-button,
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.text-button:hover {
+  text-decoration: underline;
+}
+.icon-button {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 7px;
+  color: var(--muted);
+}
+.icon-button:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.conversation-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.conversation-list li {
+  border-bottom: 1px solid var(--line);
+}
+.conversation-list li button {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  width: 100%;
+  padding: 18px 6px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.conversation-list li button:hover {
+  background: var(--accent-soft);
+}
+.conversation-list li button > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+.conversation-list strong,
+.conversation-list small {
+  display: block;
+}
+.conversation-list strong {
+  font-size: 0.98rem;
+}
+.conversation-list small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.83rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation-list-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 11px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.conversation-list-time {
+  color: var(--muted);
+  font-size: 0.79rem;
+}
+.new-conversation {
+  display: grid;
+  gap: 11px;
+  margin-bottom: 30px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.new-conversation label,
+.conversation-composer label {
+  font-size: 0.85rem;
+  font-weight: 750;
+}
+.new-conversation input,
+.conversation-composer textarea {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.new-conversation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+}
+.conversation-notice {
+  margin: 10px 22px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+.quiet-state {
+  display: grid;
+  justify-items: start;
+  gap: 9px;
+  padding: 36px 25px;
+  color: var(--muted);
+}
+.quiet-state .ant-mark {
+  width: 48px;
+  height: 34px;
+  color: var(--accent);
+}
+.quiet-state h2 {
+  color: var(--ink);
+}
+.conversation-layout {
+  display: flex;
+}
+.conversation-main,
+.thread-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.conversation-main {
+  flex: 1;
+}
+.conversation-topbar {
+  justify-content: flex-start;
+  min-height: 78px;
+  padding: 15px 22px;
+  border-bottom: 1px solid var(--line);
+}
+.conversation-topbar > div {
+  min-width: 0;
+  flex: 1;
+}
+.conversation-topbar h1 {
+  font-size: 1.24rem;
+}
+.conversation-topbar p {
+  margin-top: 2px;
+  font-size: 0.8rem;
+}
+.conversation-history,
+.thread-history {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 24px 35px;
+}
+.conversation-message {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+}
+.message-avatar {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+.message-avatar .ant-mark {
+  width: 28px;
+  height: 19px;
+}
+.message-body {
+  min-width: 0;
+  flex: 1;
+}
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.message-meta strong {
+  font-size: 0.85rem;
+}
+.message-meta time {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.message-body p {
+  margin-top: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.94rem;
+}
+.message-discuss {
+  margin-top: 5px;
+  padding: 3px 0;
+  font-size: 0.75rem;
+}
+.conversation-composer {
+  display: grid;
+  gap: 9px;
+  padding: 13px 22px 18px;
+  border-top: 1px solid var(--line);
+}
+.conversation-composer textarea {
+  resize: vertical;
+  min-height: 68px;
+  max-height: 180px;
+}
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.composer-actions small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.thread-panel {
+  width: min(39%, 490px);
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+.thread-heading {
+  min-height: 78px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.thread-heading h2 {
+  margin: 1px 0 0;
+  font-size: 1rem;
+}
+.thread-history {
+  padding: 13px 16px 30px;
+}
+.thread-history .conversation-message:first-child {
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 800px) {
+  .thread-panel {
+    width: 50%;
+  }
+  .composer-actions small {
+    display: none;
+  }
+}
+@media (max-width: 650px) {
+  .conversation-index {
+    padding-top: 30px;
+  }
+  .conversation-index-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .thread-panel {
+    width: 100%;
+  }
+  .conversation-layout.with-thread .conversation-main {
+    display: none;
+  }
+}
 
 .startup-state {
   display: grid;
