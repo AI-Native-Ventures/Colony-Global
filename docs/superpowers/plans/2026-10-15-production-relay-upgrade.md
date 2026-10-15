@@ -22,6 +22,7 @@ The current repo design started with one CI workflow and no automatic deployment
 - `migrations/0058_pending_email_sign_in_codes.sql`: populate the new email column when the old binary inserts an account code.
 - `scripts/rehearse-production-upgrade.sh` and `scripts/production-upgrade-*.sql`: apply the deployed migration set, seed old rows, apply the new migrations, and assert old/new writes and preserved data in a disposable database.
 - `.github/workflows/ci.yml`: run the migration rehearsal as a required service-backed lane and build the production relay image before release.
+- `Dockerfile`: make the local patched `kube-client` source available to cargo-chef's dependency cook; the image CI lane exposes this inherited build-context requirement.
 - `.github/workflows/deploy-production.yml`: manual dry run and guarded live release from a green default-branch commit, with a fresh verified database snapshot before Fly's release command.
 - `scripts/check-colony-global-source.mjs` and its test: permit only the new manual workflow in addition to CI.
 - `deploy/fly/PRODUCTION-UPGRADE.md`: exact staged rollout, missing credentials, activation gates, verification, and rollback limits.
