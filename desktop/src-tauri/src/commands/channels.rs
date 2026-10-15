@@ -302,11 +302,17 @@ pub async fn create_channel(
     visibility: String,
     description: Option<String>,
     ttl_seconds: Option<i32>,
+    requested_channel_id: Option<String>,
     expected_relay_url: Option<String>,
     expected_signer_pubkey: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ChannelInfo, String> {
-    let channel_uuid = uuid::Uuid::new_v4();
+    let channel_uuid = match requested_channel_id {
+        Some(id) => {
+            uuid::Uuid::parse_str(&id).map_err(|_| "invalid requested channel UUID".to_string())?
+        }
+        None => uuid::Uuid::new_v4(),
+    };
 
     let vis = match visibility.as_str() {
         "open" | "private" => visibility.as_str(),

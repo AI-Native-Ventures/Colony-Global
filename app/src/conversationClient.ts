@@ -161,6 +161,44 @@ export function createConversationClient(
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   }
 
+  async function readChannels(): Promise<Conversation[]> {
+    const raw = object(await scopedRead("get_channels", { knownHash: null }));
+    if (!Array.isArray(raw.channels) || raw.channels.length > MAX_CHANNELS)
+      throw new ConversationError("invalid");
+    return raw.channels
+      .map(parseChannel)
+      .filter((channel): channel is Conversation => channel !== null)
+      .sort(
+        (a, b) =>
+          Date.parse(b.lastMessageAt ?? "") -
+            Date.parse(a.lastMessageAt ?? "") || a.name.localeCompare(b.name),
+      );
+  }
+
+  async function readMembers(channelId: string): Promise<ConversationMember[]> {
+    if (!CHANNEL_ID.test(channelId)) throw new ConversationError("invalid");
+    const raw = object(await scopedRead("get_channel_members", { channelId }));
+    if (!Array.isArray(raw.members) || raw.members.length > 2_000)
+      throw new ConversationError("invalid");
+    return raw.members.map((member) => {
+      const entry = object(member);
+      if (
+        typeof entry.pubkey !== "string" ||
+        !ID.test(entry.pubkey) ||
+        (entry.display_name !== null && typeof entry.display_name !== "string")
+      )
+        throw new ConversationError("invalid");
+      return {
+        pubkey: entry.pubkey,
+        name:
+          typeof entry.display_name === "string" && entry.display_name.trim()
+            ? entry.display_name.slice(0, 80)
+            : null,
+        isAgent: entry.is_agent === true,
+      };
+    });
+  }
+
   return {
     relayUrl,
     assertScope,
@@ -175,45 +213,113 @@ export function createConversationClient(
       });
       await assertScope();
     },
-    async list(): Promise<Conversation[]> {
-      const raw = object(await scopedRead("get_channels", { knownHash: null }));
-      if (!Array.isArray(raw.channels) || raw.channels.length > MAX_CHANNELS)
-        throw new ConversationError("invalid");
-      return raw.channels
-        .map(parseChannel)
-        .filter((channel): channel is Conversation => channel !== null)
-        .sort(
-          (a, b) =>
-            Date.parse(b.lastMessageAt ?? "") -
-              Date.parse(a.lastMessageAt ?? "") || a.name.localeCompare(b.name),
-        );
-    },
-    async members(channelId: string): Promise<ConversationMember[]> {
+    list: readChannels,
+    members: readMembers,
+    async ensureSetupChannel(channelId: string): Promise<Conversation> {
       if (!CHANNEL_ID.test(channelId)) throw new ConversationError("invalid");
-      const raw = object(
-        await scopedRead("get_channel_members", { channelId }),
+      const existing = (await readChannels()).find(
+        (channel) => channel.id === channelId,
       );
-      if (!Array.isArray(raw.members) || raw.members.length > 2_000)
+      if (existing) return existing;
+      await assertScope();
+      let raw: unknown = null;
+      try {
+        raw = await nativeInvoke("create_channel", {
+          name: "Getting started",
+          channelType: "stream",
+          visibility: "private",
+          description: "Scout's first conversation with your company",
+          ttlSeconds: null,
+          requestedChannelId: channelId,
+          expectedRelayUrl: relayUrl,
+          expectedSignerPubkey: accountPubkey,
+        });
+      } catch {
+        // The relay may have committed the channel before the reply was lost.
+      }
+      await assertScope();
+      const created = raw ? parseChannel(raw) : null;
+      if (created && created.id === channelId) return created;
+      const recovered = (await readChannels()).find(
+        (channel) => channel.id === channelId,
+      );
+      if (recovered) return recovered;
+      throw new ConversationError("network");
+    },
+    async ensureAgentMember(
+      channelId: string,
+      agentPubkey: string,
+    ): Promise<void> {
+      if (!CHANNEL_ID.test(channelId) || !ID.test(agentPubkey))
         throw new ConversationError("invalid");
-      return raw.members.map((member) => {
-        const entry = object(member);
-        if (
-          typeof entry.pubkey !== "string" ||
-          !ID.test(entry.pubkey) ||
-          (entry.display_name !== null &&
-            typeof entry.display_name !== "string")
+      if (
+        (await readMembers(channelId)).some(
+          (member) => member.pubkey === agentPubkey,
         )
-          throw new ConversationError("invalid");
-        return {
-          pubkey: entry.pubkey,
-          name:
-            typeof entry.display_name === "string" &&
-            entry.display_name.trim().length > 0
-              ? entry.display_name.slice(0, 80)
-              : null,
-          isAgent: entry.is_agent === true,
-        };
-      });
+      )
+        return;
+      await assertScope();
+      let result: Record<string, unknown>;
+      try {
+        result = object(
+          await nativeInvoke("add_channel_members", {
+            channelId,
+            pubkeys: [agentPubkey],
+            role: "bot",
+            expectedRelayUrl: relayUrl,
+            expectedSignerPubkey: accountPubkey,
+          }),
+        );
+      } catch {
+        throw new ConversationError("network");
+      }
+      await assertScope();
+      if (!Array.isArray(result.errors) || !Array.isArray(result.added))
+        throw new ConversationError("invalid");
+      if (
+        !(await readMembers(channelId)).some(
+          (member) => member.pubkey === agentPubkey,
+        )
+      )
+        throw new ConversationError("network");
+    },
+    async sendScoutKickoff(
+      channelId: string,
+      companyId: string,
+      scoutPubkey: string,
+      businessName: string,
+    ): Promise<string> {
+      if (
+        !CHANNEL_ID.test(channelId) ||
+        !CHANNEL_ID.test(companyId) ||
+        !ID.test(scoutPubkey)
+      )
+        throw new ConversationError("invalid");
+      const name = businessName.trim();
+      if (!name || name.length > 120) throw new ConversationError("invalid");
+      await assertScope();
+      let result: Record<string, unknown>;
+      try {
+        result = object(
+          await nativeInvoke("send_channel_message", {
+            channelId,
+            content: `I finished setting up ${name}. Please get to know the business and propose our profile and team.`,
+            parentEventId: null,
+            rootEventId: null,
+            mentionPubkeys: [scoutPubkey],
+            setupFirstTurn: true,
+            setupMarker: `colony-global-scout-first-turn:${companyId}`,
+            expectedRelayUrl: relayUrl,
+            expectedSignerPubkey: accountPubkey,
+          }),
+        );
+      } catch {
+        throw new ConversationError("network");
+      }
+      await assertScope();
+      if (typeof result.event_id !== "string" || !ID.test(result.event_id))
+        throw new ConversationError("invalid");
+      return result.event_id;
     },
     async timeline(channelId: string): Promise<ConversationMessage[]> {
       if (!CHANNEL_ID.test(channelId)) throw new ConversationError("invalid");

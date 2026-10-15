@@ -149,6 +149,14 @@ pub struct UpdatePersonaRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateManagedAgentRequest {
     pub name: String,
+    /// Opt-in uniqueness for the Colony first-run Scout on one company relay.
+    #[serde(default)]
+    pub unique_company_scout: bool,
+    /// Captured workspace scope for a company-first-run create.
+    #[serde(default)]
+    pub expected_relay_url: Option<String>,
+    #[serde(default)]
+    pub expected_signer_pubkey: Option<String>,
     #[serde(default)]
     pub persona_id: Option<String>,
     /// Optional deployment-time team binding for runtime instruction layering.

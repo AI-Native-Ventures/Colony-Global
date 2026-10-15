@@ -16,6 +16,13 @@ pub async fn dispatch(cmd: crate::ProfileCmd, client: &BuzzClient) -> Result<(),
     use crate::ProfileCmd;
     match cmd {
         ProfileCmd::Show => cmd_show(client).await,
+        ProfileCmd::Propose {
+            channel,
+            thread_root,
+            proposal,
+        } => {
+            crate::commands::asks::propose_profile(client, &channel, &thread_root, &proposal).await
+        }
     }
 }
 

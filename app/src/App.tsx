@@ -18,6 +18,7 @@ import {
 } from "./companyClient";
 import { FirstRun } from "./FirstRun";
 import { PowerEntry } from "./PowerEntry";
+import { ScoutReview } from "./ScoutReview";
 
 type Connection =
   | "checking"
@@ -48,7 +49,12 @@ type CompanyState =
       companies: { company: Company; name: string; available: boolean }[];
     }
   | { kind: "setup"; context: CompanyContext; company: Company }
-  | { kind: "ready"; company: Company; profile: BusinessProfile };
+  | {
+      kind: "ready";
+      context: CompanyContext;
+      company: Company;
+      profile: BusinessProfile;
+    };
 
 const headings: Record<Destination, string> = {
   today: "Today",
@@ -67,6 +73,10 @@ export default function App() {
   const companyGeneration = useRef(0);
   const [connection, setConnection] = useState<Connection>("checking");
   const [destination, setDestination] = useState<Destination>("today");
+  const [conversationTarget, setConversationTarget] = useState<{
+    channelId: string;
+    threadRootId: string | null;
+  } | null>(null);
   const [relay, setRelay] = useState<RelayContext | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [companyState, setCompanyState] = useState<CompanyState>({
@@ -140,7 +150,7 @@ export default function App() {
           }
           setPowerPending(pending);
           setShowPower(pending);
-          setCompanyState({ kind: "ready", company, profile });
+          setCompanyState({ kind: "ready", context, company, profile });
         } else if (company.role === "owner")
           setCompanyState({ kind: "setup", context, company });
         else
@@ -335,7 +345,12 @@ export default function App() {
           setPowerStorageWarning(warning);
           setPowerPending(true);
           setShowPower(true);
-          setCompanyState({ kind: "ready", company, profile });
+          setCompanyState({
+            kind: "ready",
+            context: companyState.context,
+            company,
+            profile,
+          });
         }}
       />
     );
@@ -438,6 +453,35 @@ export default function App() {
           key={workspaceKey}
           client={conversationClient}
           ownPubkey={account.pubkey}
+          initialChannelId={conversationTarget?.channelId}
+          initialThreadRootId={conversationTarget?.threadRootId}
+        />
+      ) : destination === "today" && conversationClient ? (
+        <ScoutReview
+          key={workspaceKey}
+          company={companyState.company}
+          accountPubkey={account.pubkey}
+          accountRelayHttpUrl={relay?.httpUrl ?? ""}
+          profile={companyState.profile}
+          config={companyState.context.config}
+          companyClient={companyState.context.client}
+          conversations={conversationClient}
+          onOpenConversation={(channelId, threadRootId) => {
+            setConversationTarget({
+              channelId,
+              threadRootId: threadRootId ?? null,
+            });
+            setDestination("conversations");
+          }}
+          onProfileSaved={(profile) =>
+            setCompanyState((current) =>
+              current.kind === "ready" &&
+              current.company.id === companyState.company.id
+                ? { ...current, profile }
+                : current,
+            )
+          }
+          onSetupPower={() => setShowPower(true)}
         />
       ) : (
         <div className="screen-content">
