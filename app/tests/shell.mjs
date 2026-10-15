@@ -50,10 +50,12 @@ function channelMessage(content, options = {}) {
       tags: [
         ["h", options.channelId ?? sampleChannelId],
         ...(options.rootId
-          ? [
-              ["e", options.rootId, "", "root"],
-              ["e", options.rootId, "", "reply"],
-            ]
+          ? options.parentId && options.parentId !== options.rootId
+            ? [
+                ["e", options.rootId, "", "root"],
+                ["e", options.parentId, "", "reply"],
+              ]
+            : [["e", options.rootId, "", "reply"]]
           : []),
       ],
       content,
@@ -260,7 +262,7 @@ async function installMock(page, options = {}) {
                       (tag) =>
                         tag[0] === "e" &&
                         tag[1] === payload.args.rootEventId &&
-                        tag[3] === "root",
+                        ["root", "reply"].includes(tag[3]),
                     ),
                 ),
                 next_cursor: null,
@@ -1737,11 +1739,16 @@ test("company conversations use relay channels, messages, and a side thread", as
     rootId: root.id,
     offset: 1,
   });
+  const deeperReply = channelMessage("Let's compare dates", {
+    rootId: root.id,
+    parentId: earlierReply.id,
+    offset: 2,
+  });
   const page = await tracedPage("conversation-thread");
   await installMock(page, {
     initialAccount: true,
     channels: [sampleChannel()],
-    events: [root, earlierReply],
+    events: [root, earlierReply, deeperReply],
   });
   await page.goto(url);
   await page.getByRole("heading", { name: "Today" }).waitFor();
@@ -1754,6 +1761,10 @@ test("company conversations use relay channels, messages, and a side thread", as
   await page
     .getByRole("complementary", { name: "Message thread" })
     .getByText("I can prepare the notes")
+    .waitFor();
+  await page
+    .getByRole("complementary", { name: "Message thread" })
+    .getByText("Let's compare dates")
     .waitFor();
   if (process.env.COLONY_CONVERSATION_SHOT)
     await page.screenshot({ path: process.env.COLONY_CONVERSATION_SHOT });

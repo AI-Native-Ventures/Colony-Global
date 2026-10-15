@@ -252,7 +252,10 @@ export function createConversationClient(
         events.some(
           (event) =>
             !event.tags.some(
-              (tag) => tag[0] === "e" && tag[1] === rootId && tag[3] === "root",
+              (tag) =>
+                tag[0] === "e" &&
+                tag[1] === rootId &&
+                (tag[3] === "root" || tag[3] === "reply"),
             ),
         )
       )
