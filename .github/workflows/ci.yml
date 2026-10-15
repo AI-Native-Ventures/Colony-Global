@@ -162,6 +162,8 @@ jobs:
             cp "$release_dir/$binary" "desktop/src-tauri/binaries/${binary}-${target}"
           done
       - name: Build the native host
+        env:
+          COLONY_CREDITS_GATEWAY: "1"
         run: cargo build --manifest-path desktop/src-tauri/Cargo.toml --release --bin colony-native-host --features electron-host --locked
       - name: Package and verify the installed app
         run: |

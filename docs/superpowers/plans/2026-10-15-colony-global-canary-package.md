@@ -13,6 +13,8 @@ Acceptance gate:
 2. CI builds the real native host and required sidecars, packages them with
    the new renderer, verifies the archive and macOS signature, and attaches an
    exact-commit test artifact. No placeholder executable may be packaged.
+   The host includes the Colony credits adapter, whose UI and authorization
+   still require the relay's own capability and funded balance checks.
 3. An installed launch is checked for the new UI and a recoverable offline
    state. This does not prove a provider turn; that still requires a live
    company relay, enabled credits gateway, funded owner, and observed signed
