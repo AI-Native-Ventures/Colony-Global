@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccountError,
   type Account,
   createAccountClient,
 } from "./accountClient";
-import { getDefaultRelayUrl, getRelayHttpUrl, getRelayWsUrl } from "./bridge";
+import { getDefaultRelayHttpUrl, getDefaultRelayUrl } from "./bridge";
 import { ColonyShell, type Destination } from "./ColonyShell";
 import { CompanyEntry, CompanyPicker } from "./CompanyEntry";
+import { Conversations } from "./Conversations";
+import { createConversationClient } from "./conversationClient";
 import {
   type BusinessProfile,
   type Company,
@@ -73,6 +75,11 @@ export default function App() {
   const [powerPending, setPowerPending] = useState(false);
   const [showPower, setShowPower] = useState(false);
   const [powerStorageWarning, setPowerStorageWarning] = useState(false);
+  const [workspaceBinding, setWorkspaceBinding] = useState<{
+    key: string;
+    status: "checking" | "ready" | "error";
+  }>({ key: "", status: "checking" });
+  const workspaceGeneration = useRef(0);
 
   const connect = useCallback(() => {
     const request = ++generation.current;
@@ -81,10 +88,9 @@ export default function App() {
       let wsUrl: string;
       let httpUrl: string;
       try {
-        await getDefaultRelayUrl();
         [wsUrl, httpUrl] = await Promise.all([
-          getRelayWsUrl(),
-          getRelayHttpUrl(),
+          getDefaultRelayUrl(),
+          getDefaultRelayHttpUrl(),
         ]);
       } catch {
         if (generation.current === request) setConnection("host-unavailable");
@@ -214,6 +220,51 @@ export default function App() {
       companyGeneration.current += 1;
     };
   }, [connection, account, relay, refreshCompanies]);
+
+  const readyCompany =
+    companyState.kind === "ready" ? companyState.company : null;
+  const workspaceKey =
+    readyCompany && account
+      ? `${readyCompany.id}:${readyCompany.host}:${account.pubkey}`
+      : "";
+  const workspaceStatus =
+    workspaceBinding.key === workspaceKey
+      ? workspaceBinding.status
+      : "checking";
+  const conversationClient = useMemo(
+    () =>
+      readyCompany && account
+        ? createConversationClient(
+            readyCompany.host,
+            readyCompany.id,
+            account.pubkey,
+          )
+        : null,
+    [readyCompany, account],
+  );
+
+  const activateCompany = useCallback(() => {
+    if (!conversationClient) return;
+    const request = ++workspaceGeneration.current;
+    setWorkspaceBinding({ key: workspaceKey, status: "checking" });
+    void conversationClient.activate().then(
+      () => {
+        if (workspaceGeneration.current === request)
+          setWorkspaceBinding({ key: workspaceKey, status: "ready" });
+      },
+      () => {
+        if (workspaceGeneration.current === request)
+          setWorkspaceBinding({ key: workspaceKey, status: "error" });
+      },
+    );
+  }, [conversationClient, workspaceKey]);
+
+  useEffect(() => {
+    activateCompany();
+    return () => {
+      workspaceGeneration.current++;
+    };
+  }, [activateCompany]);
 
   if (connection !== "signed-in" || !account) {
     if (connection === "signed-out" && relay) {
@@ -352,41 +403,76 @@ export default function App() {
     <ColonyShell
       active={destination}
       onNavigate={setDestination}
-      hostReady
+      hostReady={workspaceStatus === "ready"}
       companyName={companyState.profile.name}
     >
-      <div className="screen-content">
-        <h1>{headings[destination]}</h1>
-        <div className="empty-state">
-          <span
-            className="scout-portrait"
-            role="img"
-            aria-label="Scout, AI-made ant portrait"
-            data-ant-portrait="Scout"
-          />
-          <div>
-            <h2>
-              {destination === "today"
-                ? "Your team will meet you here"
-                : `${headings[destination]} is being rebuilt`}
-            </h2>
+      {workspaceStatus !== "ready" ? (
+        <div className="screen-content">
+          <h1>
+            {workspaceStatus === "checking"
+              ? "Opening your company"
+              : "Your company is unavailable"}
+          </h1>
+          <div
+            className="empty-state"
+            role={workspaceStatus === "error" ? "alert" : "status"}
+          >
             <p>
-              {destination === "today"
-                ? "The new Colony app is being connected to your company. No work or decisions are shown until they come from the real team."
-                : "This part of Colony is being rebuilt. It will appear when its real company data and actions are ready."}
+              {workspaceStatus === "checking"
+                ? "Connecting this computer to your company's conversations."
+                : "Colony couldn't connect the desktop host to this company. Check your connection and try again."}
             </p>
-            {destination === "today" && powerPending && (
+            {workspaceStatus === "error" && (
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => setShowPower(true)}
+                onClick={activateCompany}
               >
-                Continue team setup
+                Try again
               </button>
             )}
           </div>
         </div>
-      </div>
+      ) : destination === "conversations" && conversationClient ? (
+        <Conversations
+          key={workspaceKey}
+          client={conversationClient}
+          ownPubkey={account.pubkey}
+        />
+      ) : (
+        <div className="screen-content">
+          <h1>{headings[destination]}</h1>
+          <div className="empty-state">
+            <span
+              className="scout-portrait"
+              role="img"
+              aria-label="Scout, AI-made ant portrait"
+              data-ant-portrait="Scout"
+            />
+            <div>
+              <h2>
+                {destination === "today"
+                  ? "Your team will meet you here"
+                  : `${headings[destination]} is being rebuilt`}
+              </h2>
+              <p>
+                {destination === "today"
+                  ? "The new Colony app is being connected to your company. No work or decisions are shown until they come from the real team."
+                  : "This part of Colony is being rebuilt. It will appear when its real company data and actions are ready."}
+              </p>
+              {destination === "today" && powerPending && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => setShowPower(true)}
+                >
+                  Continue team setup
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </ColonyShell>
   );
 }

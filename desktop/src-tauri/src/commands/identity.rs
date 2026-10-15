@@ -79,6 +79,12 @@ pub fn get_default_relay_url() -> String {
     relay::relay_ws_url()
 }
 
+/// The deployment account API, independent of a selected company workspace.
+#[tauri::command]
+pub fn get_default_relay_http_url() -> String {
+    relay::relay_api_base_url()
+}
+
 #[tauri::command]
 pub fn auto_connect_default_relay_enabled() -> bool {
     option_env!("BUZZ_DESKTOP_BUILD_AUTO_CONNECT_DEFAULT_RELAY").is_some()

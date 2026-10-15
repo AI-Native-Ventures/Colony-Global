@@ -34,6 +34,11 @@ export function getDefaultRelayUrl(): Promise<string> {
   return nativeString("get_default_relay_url");
 }
 
+/** The deployment account API; selecting a company must not retarget sign-in. */
+export function getDefaultRelayHttpUrl(): Promise<string> {
+  return nativeString("get_default_relay_http_url");
+}
+
 /** The current community relay, including any native override. */
 export function getRelayWsUrl(): Promise<string> {
   return nativeString("get_relay_ws_url");
